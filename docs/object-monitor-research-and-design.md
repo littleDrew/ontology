@@ -73,6 +73,12 @@ flowchart LR
 - 作为“动作与运营闭环”下游系统（创建事件、工单、审批）。
 - 不建议将其作为主 Ontology/规则运行时。
 
+
+**图解说明（本节 Mermaid）**
+- 读图顺序：`数据源 -> Event Ingestion -> Correlation -> Alert -> CMDB 映射 -> 工单 -> 通知/值班`。
+- 图中最关键节点是 `CMDB CI 映射`：它把“事件”绑定到“对象”，从而可进入对象维度治理。
+- 该图体现的是“运营闭环能力强”，但业务本体语义（非 IT 资产）需要外部本体系统补齐。
+
 ---
 
 ### 3.1.2 Datadog Monitors + Workflow Automation
@@ -99,6 +105,12 @@ flowchart LR
 **适配建议**
 - 作为外层告警分发与运维自动化；
 - 核心对象语义和持续时长状态建议留在本体平台。
+
+
+**图解说明（本节 Mermaid）**
+- 读图顺序：`可观测数据 -> Monitors/SLO -> 异常或阈值评估 -> 路由 -> 自动化工作流`。
+- `Alert Router` 是治理核心，负责把评估结果分发到不同目标系统。
+- 该图强调“评估与分发能力强”，对象关系语义仍需本体平台承载。
 
 ---
 
@@ -127,6 +139,12 @@ flowchart LR
 - 作为安全分析下游；
 - 不替代本体对象监控核心引擎。
 
+
+**图解说明（本节 Mermaid）**
+- 读图顺序：`多源安全/运维事件 -> 索引 -> 关联检索 -> 风险事件 -> ITSI/ES 分支 -> 响应系统`。
+- `Correlation Search` 是价值核心，决定噪声收敛质量与告警有效性。
+- 该图更像“事件调查和安全运营中枢”，不是对象本体规则主引擎。
+
 ---
 
 ### 3.1.4 Dynatrace（Davis AI + Automation）
@@ -151,6 +169,12 @@ flowchart LR
 **适配建议**
 - 作为技术运行态监控并行能力；
 - 与业务对象监控分层协同。
+
+
+**图解说明（本节 Mermaid）**
+- 读图顺序：`采集代理 -> 拓扑图 -> AI 异常检测 -> 问题卡 -> 自动化执行`。
+- `Topology & Smartscape` + `Davis AI` 组合决定根因分析质量。
+- 图中显示其强项是技术运行态诊断，业务对象规则仍需额外层。
 
 ---
 
@@ -177,6 +201,12 @@ flowchart LR
 - 中等复杂场景可快速落地；
 - 对关系密集规则建议配合图或流计算组件。
 
+
+**图解说明（本节 Mermaid）**
+- 读图顺序：`数据采集 -> 索引 -> Watcher/Rules -> 定时查询评估 -> Connector -> 通知`。
+- `Schedule/Query Eval` 决定告警及时性与误报率。
+- 图示更适合查询型规则；复杂关系和持续状态建议外置流式引擎。
+
 ---
 
 ### 3.1.6 云厂商告警（AWS/Azure/GCP）
@@ -199,6 +229,12 @@ flowchart LR
 
 **适配建议**
 - 借鉴其规则治理、告警路由、可靠性工程实践。
+
+
+**图解说明（本节 Mermaid）**
+- 读图顺序：`云遥测 -> 托管告警引擎 -> 规则评估 -> 通知中心 -> 自动修复`。
+- 图中表达的是通用机制，不代表私有云可直接复用产品本身。
+- 可借鉴点是规则治理、告警路由、自动修复链路设计。
 
 ---
 
@@ -237,6 +273,11 @@ flowchart TB
     C --> H
 ```
 
+**图解说明（本节 Mermaid）**
+- 图分为 `Core` 与 `Ops` 两个域：Core 保留对象语义与规则执行主权，Ops 承担外部长板能力。
+- 关键交互是 `Rule Engine/Activity Ledger` 向外分发结果，避免外部产品反向侵入核心语义。
+- 该图的核心设计思想是“核心内聚、能力外接”。
+
 **说明**
 - 核心平台保持“对象语义 + 规则执行 + 审计”主权；
 - 外部产品按长板接入，避免把核心对象语义分散到多个产品。
@@ -272,6 +313,11 @@ flowchart LR
 
 **可行性**：高（功能完整、可扩展、私有云成熟）。
 
+**图解说明（本节 Mermaid）**
+- 主链路：`事件源 -> Kafka -> Flink CEP -> Evaluation -> Temporal -> 通知/动作`。
+- 控制面：`Control Plane API -> PostgreSQL` 管理规则与版本。
+- 审计面：`OpenSearch` 提供活动检索，形成执行与审计双闭环。
+
 ---
 
 ### 方案 B：Kafka + Kafka Streams + Drools + Argo Workflows + PostgreSQL
@@ -295,6 +341,12 @@ flowchart LR
 
 **可行性**：中高（团队 Java 强时优势明显）。
 
+
+**图解说明（本节 Mermaid）**
+- 主链路：`Kafka Streams` 处理流，`Drools` 做规则求值，`Argo` 执行动作流程。
+- `PostgreSQL` 提供规则与版本的统一管理。
+- 图的重点是“轻量组合 + Java 生态友好”，但 CEP 深度弱于 Flink。
+
 ---
 
 ### 方案 C：Pulsar + Flink + OPA/CEL + Temporal + ClickHouse
@@ -316,6 +368,12 @@ flowchart LR
 - ClickHouse 提供高压缩分析存储。
 
 **可行性**：中（吞吐强，但整合门槛高）。
+
+
+**图解说明（本节 Mermaid）**
+- 主链路：`Pulsar` 承载多租户消息，`Flink` 计算，`OPA/CEL` 做策略求值。
+- `Temporal` 执行动作，`ClickHouse` 承接审计分析。
+- 图体现“高吞吐 + 强分析”的路线，代价是整合复杂。
 
 ---
 
@@ -340,6 +398,12 @@ flowchart LR
 
 **可行性**：中（MVP 快，但超大规模弹性偏弱）。
 
+
+**图解说明（本节 Mermaid）**
+- 主链路：`Debezium CDC -> NATS -> Eval Service(CEL) -> Prefect`。
+- 活动日志回写 PostgreSQL，形成最小可用闭环。
+- 图强调 MVP 速度，适合先验证再扩展。
+
 ---
 
 ### 方案 E：Neo4j + Kafka + Flink + Temporal（图中心）
@@ -361,6 +425,12 @@ flowchart LR
 
 **可行性**：中高（关系密集场景很优，但成本高）。
 
+
+**图解说明（本节 Mermaid）**
+- 主链路：`Kafka -> Flink Evaluator -> Neo4j` 查询关系规则，再由 `Temporal` 执行动作。
+- 关键实践：持续时长状态放在 Flink，而不是图库。
+- 图对应“关系密集规则优先”的选型思路。
+
 ---
 
 ### 方案 F：JanusGraph + Cassandra + Kafka + Flink（全开源横向扩展）
@@ -381,6 +451,12 @@ flowchart LR
 
 **可行性**：中（超大规模潜力强，但研发/运维门槛高）。
 
+
+**图解说明（本节 Mermaid）**
+- 主链路：`Kafka + Flink` 做评估，`JanusGraph + Cassandra` 提供大规模图存储。
+- 审计与通知为并行输出，强调横向扩展能力。
+- 图显示该路线偏长期与超大规模，实施门槛最高。
+
 ---
 
 ### 3.2.7 开源方案对比结论
@@ -393,93 +469,6 @@ flowchart LR
 ---
 
 
-### 3.3 第3章 Mermaid 逻辑视图逐图说明（新增）
-
-> 目的：帮助读者按“入口数据 -> 核心处理 -> 输出动作”的顺序理解每张图，避免只看图不知语义。
-
-#### 3.3.1 图 3.1.1（ServiceNow）怎么读
-- **入口**：来自监控/日志/APM/网络的事件先进入 `Event Ingestion`。
-- **核心处理**：`Correlation Engine` 做事件归并与降噪，把大量原始事件收敛成可操作的告警。
-- **对象映射**：告警映射到 `CMDB CI`，把事件和“对象（资产）”关联起来。
-- **动作输出**：按优先级策略触发 `Incident/Change` 工单，最终进入通知与值班流程。
-- **与本方案关系**：它强在“运营闭环”，弱在“通用业务本体语义”。
-
-#### 3.3.2 图 3.1.2（Datadog）怎么读
-- **入口**：Metrics/Logs/Traces 进入 Datadog 数据管道。
-- **核心处理**：`Monitors & SLO` + `Anomaly/Threshold Eval` 产生命中结果。
-- **输出**：经 `Alert Router` 进入 `Workflow Automation`，再分发到 Webhook/Jira/PagerDuty/Slack。
-- **理解重点**：它擅长“评估+分发”，但对象关系语义通常要在外部系统维护。
-
-#### 3.3.3 图 3.1.3（Splunk ITSI/ES）怎么读
-- **入口**：SIEM 与多源安全/运维事件进入 `Splunk Indexing`。
-- **核心处理**：`Correlation Search` 形成 `Risk/Notable Event`。
-- **分支输出**：一条到 ITSI 服务分析，一条到 ES 事件审查，最终进入响应系统。
-- **理解重点**：更偏“事件调查与安全运营”，不是对象本体中心引擎。
-
-#### 3.3.4 图 3.1.4（Dynatrace）怎么读
-- **入口**：OneAgent/OTel 采集到运行态信号。
-- **核心处理**：`Topology & Smartscape` 建立拓扑，`Davis AI` 给出异常与根因候选。
-- **输出**：形成问题卡（Problem Card）并触发自动化流程/外部系统。
-- **理解重点**：技术拓扑分析强，业务对象规则需要额外层补齐。
-
-#### 3.3.5 图 3.1.5（Elastic）怎么读
-- **入口**：Beats/Logstash/APM 将数据写入 Elasticsearch 索引。
-- **核心处理**：Watcher/Kibana 规则按周期执行查询评估。
-- **输出**：通过 Action Connector 推送通知渠道，并保存告警历史。
-- **理解重点**：查询型规则落地快，但复杂关系与持续状态通常要外置引擎。
-
-#### 3.3.6 图 3.1.6（云厂商告警）怎么读
-- **入口**：Cloud Telemetry 输入托管告警引擎。
-- **核心处理**：指标/日志/事件规则统一评估。
-- **输出**：通知中心路由到 Email/SMS/Webhook/函数，再触发自动修复。
-- **理解重点**：机制成熟可借鉴，但私有云主场景通常不作为核心依赖。
-
-#### 3.3.7 图 3.1.7（多产品组合）怎么读
-- **Core 区**：`Ontology/Object Store + Rule Engine + Activity Ledger` 是主系统“真核心”。
-- **Ops 区**：ServiceNow/Datadog/Splunk/Dynatrace/Elastic 作为外部能力域。
-- **交互方式**：核心平台将“命中结果/活动数据”按场景下发给不同产品。
-- **理解重点**：核心语义和规则执行必须留在 Core，外部产品按长板接入，避免语义割裂。
-
-#### 3.3.8 图 3.2.A（Kafka + Flink CEP + Temporal）怎么读
-- **主链路**：事件进 Kafka -> Flink CEP 求值 -> 结果进 Temporal 执行动作。
-- **控制面**：Control Plane API 负责规则与元数据（PostgreSQL）。
-- **审计面**：OpenSearch 负责活动检索与审计查询。
-- **理解重点**：该图体现“流式评估 + 工作流执行 + 审计分层”的完整闭环。
-
-#### 3.3.9 图 3.2.B（Kafka Streams + Drools + Argo）怎么读
-- **主链路**：Kafka Streams 做流处理，Drools 做规则执行，Argo 驱动动作流程。
-- **状态与版本**：规则与版本保存在 PostgreSQL。
-- **理解重点**：组件较轻、Java 友好；复杂 CEP 能力不如 Flink CEP。
-
-#### 3.3.10 图 3.2.C（Pulsar + Flink + OPA/CEL + ClickHouse）怎么读
-- **主链路**：Pulsar 提供多租户消息，Flink 做计算，OPA/CEL 做策略求值。
-- **输出**：Temporal 执行动作，ClickHouse 做审计分析归档。
-- **理解重点**：吞吐与分析强，但组件整合和团队门槛较高。
-
-#### 3.3.11 图 3.2.D（Debezium + NATS + CEL + Prefect）怎么读
-- **主链路**：Debezium 从业务库抓 CDC -> NATS 分发 -> Eval Service(CEL) 求值。
-- **流程执行**：Prefect 承担动作流程，活动日志回写 PostgreSQL。
-- **理解重点**：MVP 快速起步合适；高峰扩展能力相对一般。
-
-#### 3.3.12 图 3.2.E（Neo4j 图中心）怎么读
-- **主链路**：Kafka 事件 -> Flink Evaluator -> Neo4j 查询关系规则 -> Temporal 动作。
-- **关键点**：Flink 维护持续时长状态，避免图库承担高频状态计算。
-- **理解重点**：关系规则表达最强，适合反欺诈/供应链等关系密集场景。
-
-#### 3.3.13 图 3.2.F（JanusGraph + Cassandra）怎么读
-- **主链路**：Kafka + Flink 负责评估，JanusGraph/Cassandra 承担大规模图存储。
-- **输出**：评估结果进入审计存储与通知动作。
-- **理解重点**：偏超大规模长期路线，工程与运维复杂度最高。
-
-#### 3.3.14 第3章读图总方法（建议）
-- 第一步：先看“入口数据是什么”。
-- 第二步：定位“规则评估引擎在哪里”。
-- 第三步：确认“动作执行与审计存储分层”。
-- 第四步：判断“对象语义是在核心平台还是外部产品”。
-
-这样可以快速识别：该方案是“核心可替代”还是“外围增强”。
-
----
 
 ## 4. Palantir OSv2 存储模式分析（推断型）
 
