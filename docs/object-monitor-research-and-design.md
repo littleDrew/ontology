@@ -238,7 +238,132 @@ flowchart LR
 
 ---
 
-### 3.1.7 多产品组合成“Object Monitor 对标方案”的整体逻辑视图
+### 3.1.7 Cognite Data Fusion (CDF)
+
+**产品定位**
+- CDF 是工业数据平台，核心能力是把 OT/IT 数据进行上下文建模（Contextualization）、时间序列管理、关系建模、工作流与事件自动化。
+- 在“资产对象 + 时间序列 + 事件规则”的工业场景中，与 Object Monitor 的对象监控链路高度相似。
+
+**推导的详细实现方案（尽量贴近可落地形态）**
+
+```mermaid
+flowchart TB
+    subgraph Source[工业与业务数据源]
+      S1[SCADA/PLC/Historians]
+      S2[ERP/MES/CMMS]
+      S3[文档与3D模型]
+    end
+
+    subgraph Ingest[接入与标准化]
+      I1[Extractor/Connector]
+      I2[Raw Data Pipeline]
+      I3[Identity & Mapping]
+    end
+
+    subgraph Context[上下文建模层]
+      C1[Assets 模型]
+      C2[Time Series]
+      C3[Events]
+      C4[Relationships]
+      C5[Contextualization Engine]
+    end
+
+    subgraph Monitor[监控与规则]
+      M1[Rule/Condition Evaluator]
+      M2[Duration State Engine]
+      M3[Alert/Event Router]
+    end
+
+    subgraph Action[动作与闭环]
+      A1[Workflow/Function Trigger]
+      A2[Notification Channels]
+      A3[Work Order Integration]
+    end
+
+    subgraph Audit[活动与审计]
+      L1[Activity Timeline]
+      L2[Investigation Query]
+      L3[Compliance Audit Log]
+    end
+
+    S1 --> I1
+    S2 --> I1
+    S3 --> I1
+    I1 --> I2 --> I3 --> C5
+    C5 --> C1
+    C5 --> C2
+    C5 --> C3
+    C5 --> C4
+    C1 --> M1
+    C2 --> M1
+    C3 --> M1
+    C4 --> M1
+    M1 --> M2 --> M3
+    M3 --> A1
+    M3 --> A2
+    A1 --> A3
+    M3 --> L1
+    L1 --> L2
+    L1 --> L3
+```
+
+**实现机制推导（对应 Object Monitor）**
+1. **对象层（Object）**：可由 `Assets + Relationships` 承载，对应对象类型与关系。
+2. **输入层（Input）**：来自 `Time Series + Events + Asset 属性` 的联合输入绑定。
+3. **条件层（Condition）**：阈值、区间、统计窗口、关系约束（如父子资产联动）。
+4. **持续时长（Duration）**：由 `Duration State Engine` 维护进入/退出时间点，支持“持续高温1小时”类规则。
+5. **评估层（Evaluation）**：事件触发 + 周期扫描混合执行，写活动日志。
+6. **动作层（Actions）**：触发工作流/工单系统并回写状态，形成闭环。
+7. **审计层（Activity）**：保留输入快照哈希、规则版本、通知轨迹。
+
+**可行性与局限**
+- 可行性：在工业资产监控上非常强，尤其是对象上下文 + 时序规则。
+- 局限：若扩展到通用企业本体（非工业语义），需要额外抽象层对齐业务域模型。
+
+**图解说明（本节 Mermaid）**
+- 读图主线：`多源工业数据 -> 上下文建模 -> 规则评估 -> 动作闭环 -> 审计追踪`。
+- 图中 `Contextualization Engine` 是关键，它决定对象关系与时序信号如何被统一解释。
+- 该图最接近“对象+时序+事件”的监控模式，适合制造与能源类场景。
+
+---
+
+### 3.1.8 Azure Digital Twins (ADT)
+
+**产品定位**
+- ADT 提供数字孪生图模型（DTDL）、关系建模与基于事件路由的数字孪生状态处理。
+- 与 Object Monitor 的对应关系在于“实体图 + 事件驱动 + 条件触发”，但需要外部规则/工作流服务协同。
+
+```mermaid
+flowchart LR
+    D[Device/IoT/业务系统] --> H[IoT Hub/Event Hub]
+    H --> T[Azure Digital Twins
+(DTDL + Twin Graph)]
+    T --> Q[Twin Query/API]
+    H --> R[Event Routing]
+    R --> F[Azure Functions/Stream Analytics]
+    F --> E[Rule Evaluation]
+    E --> N[Notification/Logic Apps]
+    E --> W[Workflows/Service Bus]
+    E --> A[Activity Log/Monitor]
+```
+
+**与 Object Monitor 映射**
+- `Object/Link`：ADT Twin + Relationship。
+- `Input`：Twin 属性、遥测事件、外部查询结果。
+- `Condition/Evaluation`：通常由 Functions/Stream Analytics/Rules 服务实现。
+- `Actions/Notifications`：Logic Apps、Service Bus、Teams/Email/Webhook。
+
+**可行性与局限**
+- 可行性：在 Azure 生态中构建数字孪生监控链路较顺畅。
+- 局限：规则引擎和复杂持续状态管理往往需要额外服务拼装。
+
+**图解说明（本节 Mermaid）**
+- 读图主线：`数据接入 -> Twin 图更新 -> 事件路由 -> 外部规则评估 -> 通知/动作`。
+- 图中 ADT 负责对象图语义，规则执行主体在外围服务，属于“图语义强、规则需外接”模式。
+
+---
+
+### 3.1.9 多产品组合成“Object Monitor 对标方案”的整体逻辑视图
 
 > 组合思路：本体平台负责对象语义与规则引擎，企业产品负责下游动作闭环与安全运营。
 
@@ -262,6 +387,10 @@ flowchart TB
 技术根因]
       H[Elastic
 检索告警]
+      I[CDF
+工业数据上下文]
+      J[ADT
+数字孪生图]
     end
 
     A --> B
@@ -271,6 +400,8 @@ flowchart TB
     C --> F
     B --> G
     C --> H
+    B --> I
+    B --> J
 ```
 
 **图解说明（本节 Mermaid）**

@@ -7,6 +7,8 @@
 云原生,AWS CloudWatch Alarms,弱,强,中,中,中,弱,机制可参考,托管可靠性高,不适合私有云主部署,借鉴机制不作为主方案
 云原生,Azure Monitor Alerts,弱,强,中,中,中,弱,机制可参考,企业集成能力较好,不适合私有云主部署,借鉴机制不作为主方案
 云原生,Google Cloud Monitoring Alerting,弱,强,中,中,中,弱,机制可参考,平台成熟度较高,不适合私有云主部署,借鉴机制不作为主方案
+厂商产品,Cognite Data Fusion (CDF),强,强,强,中-强,强,中-强,工业对象监控能力高度接近,资产上下文+时序+事件一体化能力强,通用企业本体抽象需额外设计,制造/能源等工业场景优先
+云原生,Azure Digital Twins (ADT),强,中,中-强,中,中,中,对象图与关系建模接近,Twin图语义与IoT集成能力强,规则执行与持续状态需外部服务补足,Azure生态内可作为对象语义层
 开源组合,Kafka + Flink CEP + Temporal + PostgreSQL,强,强,强,强,强,强,能力面最接近,规模与可控性平衡最佳,平台复杂度较高,首选主架构
 开源组合,Kafka Streams + Drools + Argo + PostgreSQL,中,中-强,中,强,中,强,可作为务实替代,组件较轻且Java生态友好,复杂CEP能力弱于Flink,Java团队可选次优方案
 开源组合,Pulsar + Flink + OPA/CEL + ClickHouse,中,强,强,中-强,强,中-强,高吞吐场景接近,吞吐与分析能力突出,系统整合复杂度较高,高吞吐优先时选用
