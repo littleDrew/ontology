@@ -42,82 +42,353 @@
 
 ## 3.1 企业产品（可直接采购或深度集成）
 
+> 本节对每款产品都给出：定位、关键组件、与 Object Monitor 的映射、集成方式、局限性，并附逻辑视图。
+
 ### 3.1.1 ServiceNow Event Management + CMDB
-- **实现特点**：CI（配置项）模型 + 事件归并 + 告警到工单闭环。
-- **与 Object Monitor 关联**：
-  - 近似于“对象 + 规则 + 动作”的运营闭环。
-  - 但对象语义表达能力更偏 IT 资产，不是通用 Ontology。
-- **适配建议**：可作为通知/工单动作域，不建议作为主 Ontology 引擎。
 
-### 3.1.2 Datadog Monitors + Workflow Automation
-- **实现特点**：监控规则、异常检测、告警路由与自动化动作。
-- **关联关系**：
-  - 强在监控/告警执行域。
-  - 对“对象关系语义 + 业务本体”支持较弱。
-- **适配建议**：适合做外层告警通道，不适合承载核心本体模型。
+**产品定位**
+- ServiceNow 以 CMDB（配置项/CI）为对象中心，Event Management 负责事件归并、告警生成与工单闭环。
+- 在“对象-事件-动作”链路上，与 Object Monitor 目标最接近的是运营闭环而非本体语义建模。
 
-### 3.1.3 Splunk ES/ITSI
-- **实现特点**：事件关联、风险分析、SOC/运维告警。
-- **关联关系**：
-  - 强在事件聚合与调查。
-  - Object-centric 语义需额外构建。
-- **适配建议**：可作为安全运营侧的下游分析系统。
+**典型逻辑视图（ServiceNow 单产品）**
 
-### 3.1.4 Dynatrace（Davis AI + Automation）
-- **实现特点**：异常检测、根因分析、自动化。
-- **关联关系**：更偏应用拓扑与性能对象，不是通用业务对象监控。
-- **适配建议**：适合作为“技术监控”平行能力，不替代业务本体监控。
+```mermaid
+flowchart LR
+    A[数据源: 监控/日志/APM/网络告警] --> B[Event Ingestion]
+    B --> C[事件归并/降噪 Correlation Engine]
+    C --> D[告警记录 Alert]
+    D --> E[CMDB CI 映射]
+    E --> F[规则与优先级策略]
+    F --> G[Incident/Change 工单]
+    G --> H[通知/升级/值班]
+    H --> I[运营看板与审计]
+```
 
-### 3.1.5 Elastic Watcher / Kibana Alerting
-- **实现特点**：基于索引查询的条件告警，动作可扩展。
-- **关联关系**：
-  - 可实现 Monitor 的 condition/evaluation。
-  - 对对象关系/图语义与复杂持续状态表达有限。
-- **适配建议**：适合中等复杂度规则场景。
+**与 Object Monitor 映射**
+- `Object` 对应 CMDB CI（但偏 IT 资产，不是通用业务对象）。
+- `Condition/Evaluation` 对应告警规则与事件相关性。
+- `Actions` 对应 ITSM 工单/流程自动化。
 
-### 3.1.6 云厂商告警（AWS/Azure/GCP）
-- **实现特点**：指标/日志/事件告警成熟、可托管。
-- **关联关系**：执行层可用；对象本体层不足。
-- **适配建议**：私有云场景通常仅借鉴设计，不直接采用。
+**适配建议**
+- 作为“动作与运营闭环”下游系统（创建事件、工单、审批）。
+- 不建议将其作为主 Ontology/规则运行时。
 
 ---
 
+### 3.1.2 Datadog Monitors + Workflow Automation
+
+**产品定位**
+- Datadog 强于可观测数据聚合、监控规则、异常检测和通知编排。
+- 对业务对象语义（对象关系、对象集）表达能力相对有限。
+
+```mermaid
+flowchart LR
+    A[Metrics/Logs/Traces] --> B[Datadog Data Pipeline]
+    B --> C[Monitors & SLO]
+    C --> D[Anomaly/Threshold Eval]
+    D --> E[Alert Router]
+    E --> F[Workflow Automation]
+    F --> G[Webhook/Jira/PagerDuty/Slack]
+    D --> H[Dashboards/Notebooks]
+```
+
+**与 Object Monitor 映射**
+- `Evaluation/Notifications` 非常强；
+- `Object Model` 与 `Link Type` 需要外部系统补足。
+
+**适配建议**
+- 作为外层告警分发与运维自动化；
+- 核心对象语义和持续时长状态建议留在本体平台。
+
+---
+
+### 3.1.3 Splunk ITSI / ES
+
+**产品定位**
+- 强项是事件关联、风险评分、SOC 分析与调查闭环。
+- 适合“安全/运维事件态势”，不是对象本体优先产品。
+
+```mermaid
+flowchart LR
+    A[SIEM/日志/网络/终端事件] --> B[Splunk Indexing]
+    B --> C[Correlation Search]
+    C --> D[Risk/Notable Event]
+    D --> E[ITSI Service Analyzer]
+    D --> F[ES Incident Review]
+    E --> G[通知与响应系统]
+    F --> G
+```
+
+**与 Object Monitor 映射**
+- `Activity/Audit` 与事件调查链路较强。
+- `Object-centric` 规则需要额外对象语义层。
+
+**适配建议**
+- 作为安全分析下游；
+- 不替代本体对象监控核心引擎。
+
+---
+
+### 3.1.4 Dynatrace（Davis AI + Automation）
+
+**产品定位**
+- 以应用拓扑和性能根因为主，适合技术栈异常诊断。
+
+```mermaid
+flowchart LR
+    A[OneAgent/OTel] --> B[Topology & Smartscape]
+    B --> C[Davis AI 异常检测]
+    C --> D[Problem Card]
+    D --> E[Automation Engine]
+    E --> F[Runbook/Webhook/ITSM]
+    C --> G[SLO & Dashboard]
+```
+
+**与 Object Monitor 映射**
+- 技术对象（服务/主机）监控强；
+- 业务对象和跨域关系需外部建模。
+
+**适配建议**
+- 作为技术运行态监控并行能力；
+- 与业务对象监控分层协同。
+
+---
+
+### 3.1.5 Elastic Watcher / Kibana Alerting
+
+**产品定位**
+- 面向查询型告警：基于索引和 DSL 查询进行条件评估。
+
+```mermaid
+flowchart LR
+    A[Ingest: Beats/Logstash/APM] --> B[Elasticsearch Index]
+    B --> C[Watcher/Kibana Rules]
+    C --> D[Schedule/Query Eval]
+    D --> E[Action Connector]
+    E --> F[Email/Webhook/Slack/Jira]
+    D --> G[Alert History]
+```
+
+**与 Object Monitor 映射**
+- 能覆盖部分 `condition/evaluation`；
+- 复杂关系规则、持续状态机通常需外置流式引擎。
+
+**适配建议**
+- 中等复杂场景可快速落地；
+- 对关系密集规则建议配合图或流计算组件。
+
+---
+
+### 3.1.6 云厂商告警（AWS/Azure/GCP）
+
+**产品定位**
+- 托管监控告警与自动化触发能力成熟，适合云原生体系。
+
+```mermaid
+flowchart LR
+    A[Cloud Telemetry] --> B[Managed Monitor/Alert Engine]
+    B --> C[Metric/Log/Event Rules]
+    C --> D[Notification Hub]
+    D --> E[Email/SMS/Webhook/Function]
+    E --> F[自动化修复与工单]
+```
+
+**与 Object Monitor 映射**
+- 机制可借鉴；
+- 私有云主部署场景下不宜作为核心依赖。
+
+**适配建议**
+- 借鉴其规则治理、告警路由、可靠性工程实践。
+
+---
+
+### 3.1.7 多产品组合成“Object Monitor 对标方案”的整体逻辑视图
+
+> 组合思路：本体平台负责对象语义与规则引擎，企业产品负责下游动作闭环与安全运营。
+
+```mermaid
+flowchart TB
+    subgraph Core[本体监控核心平台]
+      A[Ontology/Object Store]
+      B[Rule Engine
+(阈值+持续时长)]
+      C[Activity Ledger]
+    end
+
+    subgraph Ops[企业产品域]
+      D[ServiceNow
+工单/流程]
+      E[Datadog
+告警分发]
+      F[Splunk ES/ITSI
+安全分析]
+      G[Dynatrace
+技术根因]
+      H[Elastic
+检索告警]
+    end
+
+    A --> B
+    B --> C
+    B --> D
+    B --> E
+    C --> F
+    B --> G
+    C --> H
+```
+
+**说明**
+- 核心平台保持“对象语义 + 规则执行 + 审计”主权；
+- 外部产品按长板接入，避免把核心对象语义分散到多个产品。
+
 ## 3.2 开源组合方案（扩展，超出此前两种）
 
-以下方案均可达到“Object Monitor 对标”能力，但侧重点不同。
+> 本节每套方案都给出 Mermaid 逻辑图、关键交互与可行性判断。
 
-### 方案 A：Kafka + Flink CEP + Temporal + PostgreSQL + OpenSearch + Keycloak
-- **优势**：
-  - 流式与持续时长规则能力最强（CEP 原生支持）。
-  - 动作编排（Temporal）支持重试/补偿/幂等。
-  - 审计与检索清晰分层。
-- **劣势**：组件较多，平台运维复杂。
-- **适用**：你当前场景（金融+制造）首选。
+### 方案 A：Kafka + Flink CEP + Temporal + PostgreSQL + OpenSearch + Keycloak（首选）
+
+```mermaid
+flowchart LR
+    S[业务系统/IoT/DB CDC] --> K[Kafka]
+    K --> F[Flink CEP]
+    F --> E[Evaluation Topic]
+    E --> T[Temporal Worker]
+    T --> N[通知/动作执行器]
+    F --> P[(PostgreSQL
+规则/元数据)]
+    F --> O[(OpenSearch
+活动日志)]
+    U[用户/API] --> G[Control Plane API]
+    G --> P
+    G --> K
+    I[Keycloak] --> G
+```
+
+**交互与分工**
+- Kafka：事件总线与回放基础；
+- Flink CEP：持续时长、序列模式等复杂评估；
+- Temporal：动作重试/补偿/幂等；
+- OpenSearch：活动检索与审计查询。
+
+**可行性**：高（功能完整、可扩展、私有云成熟）。
+
+---
 
 ### 方案 B：Kafka + Kafka Streams + Drools + Argo Workflows + PostgreSQL
-- **优势**：组件相对轻量，Java 生态成熟。
-- **劣势**：复杂事件模式能力弱于 Flink CEP，状态管理需精心设计。
-- **适用**：规则复杂度中等、团队 Java 强。
+
+```mermaid
+flowchart LR
+    S[事件源] --> K[Kafka]
+    K --> KS[Kafka Streams]
+    KS --> D[Drools Rule Service]
+    D --> R[Result Topic]
+    R --> A[Argo Workflows]
+    A --> N[通知/动作]
+    M[(PostgreSQL
+规则与版本)] --> D
+```
+
+**交互与分工**
+- Kafka Streams 处理轻量状态；
+- Drools 负责规则执行；
+- Argo 管理流程动作。
+
+**可行性**：中高（团队 Java 强时优势明显）。
+
+---
 
 ### 方案 C：Pulsar + Flink + OPA/CEL + Temporal + ClickHouse
-- **优势**：流式吞吐强，分析存储成本可控。
-- **劣势**：生态整合与团队学习成本较高。
-- **适用**：高吞吐、多租户、强分析回查。
+
+```mermaid
+flowchart LR
+    S[多源事件] --> P[Pulsar]
+    P --> F[Flink]
+    F --> C[CEL/OPA Policy Eval]
+    C --> T[Temporal]
+    T --> N[通知/动作]
+    F --> CH[(ClickHouse
+审计分析)]
+```
+
+**交互与分工**
+- Pulsar 负责多租户 topic/订阅；
+- OPA/CEL 负责策略表达；
+- ClickHouse 提供高压缩分析存储。
+
+**可行性**：中（吞吐强，但整合门槛高）。
+
+---
 
 ### 方案 D：Debezium + PostgreSQL + NATS JetStream + CEL + Prefect
-- **优势**：架构较简洁、私有化成本低。
-- **劣势**：在超大规模下弹性不如 Kafka/Flink 组合。
-- **适用**：中小规模起步，快速 MVP。
 
-### 方案 E：Neo4j + Kafka + Flink + Temporal（图中心方案）
-- **优势**：对象关系查询/路径规则表达自然。
-- **劣势**：图数据库成本与运维复杂度较高。
-- **适用**：关系/关联规则密集型行业（反欺诈、供应链）。
+```mermaid
+flowchart LR
+    DB[(业务DB)] --> D[Debezium CDC]
+    D --> NATS[NATS JetStream]
+    NATS --> E[Eval Service
+(CEL)]
+    E --> P[Prefect Flows]
+    P --> X[通知/动作]
+    E --> A[(PostgreSQL
+活动日志)]
+```
+
+**交互与分工**
+- Debezium 提供低侵入 CDC；
+- NATS 提供轻量消息中枢；
+- Prefect 承担工作流执行。
+
+**可行性**：中（MVP 快，但超大规模弹性偏弱）。
+
+---
+
+### 方案 E：Neo4j + Kafka + Flink + Temporal（图中心）
+
+```mermaid
+flowchart LR
+    S[事件/对象变更] --> K[Kafka]
+    K --> F[Flink Evaluator]
+    F --> G[(Neo4j
+对象关系图)]
+    F --> T[Temporal]
+    T --> N[通知/动作]
+    F --> L[(Activity Store)]
+```
+
+**交互与分工**
+- Neo4j 提供关系查询与路径规则；
+- Flink 维护持续时长状态机，避免图库热点击穿。
+
+**可行性**：中高（关系密集场景很优，但成本高）。
+
+---
 
 ### 方案 F：JanusGraph + Cassandra + Kafka + Flink（全开源横向扩展）
-- **优势**：大规模分布式扩展能力强。
-- **劣势**：部署运维复杂度最高，研发门槛高。
-- **适用**：超大规模、多数据中心企业。
+
+```mermaid
+flowchart LR
+    S[事件源] --> K[Kafka]
+    K --> F[Flink]
+    F --> J[JanusGraph API]
+    J --> C[(Cassandra)]
+    F --> A[(Audit Store)]
+    F --> N[通知/动作]
+```
+
+**交互与分工**
+- JanusGraph + Cassandra 提供大规模图扩展；
+- Flink 负责主评估路径。
+
+**可行性**：中（超大规模潜力强，但研发/运维门槛高）。
+
+---
+
+### 3.2.7 开源方案对比结论
+
+- **首选**：方案 A（能力完整与工程可控性平衡最佳）。
+- **成本敏感 MVP**：方案 D。
+- **关系密集行业（反欺诈/供应链）**：方案 E。
+- **超大规模长期路线**：方案 F（需强平台团队）。
 
 ---
 
@@ -137,40 +408,134 @@
 - 优势：评估性能好、规则计算稳定、可重放与审计更容易。
 - 挑战：数据同步延迟、存储成本、去重与版本治理复杂。
 
-## 4.2 去重（de-duplicate）机制推断
-
-在复制模式中，典型实现是：
-1. 以业务主键 + 版本号 + 来源系统标识构建唯一键。
-2. CDC 事件进入去重器（按主键/序列号幂等）。
-3. 仅保存最新快照 + 变更日志（可配置保留窗口）。
-4. 对大字段做列式压缩/外部对象存储引用，减少重复存储。
-
 ---
 
 ## 5. 不同数据模式下的 Object Monitor 机制设计
 
-## 5.1 复制模式（Copy/Materialized）
+## 5.1 复制模式（Copy/Materialized）详细设计
 
-### 机制
-- Monitor Evaluation 主要读取本地对象投影（低延迟）。
-- 流式规则读取 CDC 事件，批量规则扫描投影快照。
-- Activity 与审计记录完整保存在平台侧。
+### 5.1.1 适用场景与核心原则
+- 适用于高频评估、低延迟要求、审计要求高的金融和制造核心流程。
+- 原则：**评估不回源、对象投影就近读取、事件驱动增量更新**。
 
-### 适配图数据库后端（Neo4j / pggraph）
-- 关系条件规则（如 2-hop 邻接约束）直接在图查询层求值。
-- 持续时长规则仍建议在流处理层做状态机，避免图库成为高频计算引擎。
+### 5.1.2 架构逻辑视图（复制模式）
 
-## 5.2 非复制模式（Non-copy/Virtualized）
+```mermaid
+flowchart TB
+    subgraph Src[源系统]
+      S1[业务DB/IoT/业务API]
+    end
 
-### 机制
-- 评估前通过 Data Access Adapter 拉取最新状态。
-- 需要“短期状态缓存 + 输入快照”保证评估一致性。
-- 对持续时长规则必须维护平台侧状态存储（不能每次回源重算）。
+    subgraph Ingest[数据接入与复制]
+      C1[CDC/事件采集]
+      C2[Kafka]
+      C3[Projection Builder]
+    end
 
-### 关键补偿设计
-1. **快照一致性**：每次评估写入 input snapshot hash。
-2. **回源容错**：源不可用时降级为“延迟评估 + 补偿重算”。
-3. **审计可复现**：记录外部数据版本戳（watermark/LSN）。
+    subgraph Store[对象存储层]
+      O1[(Object Projection Store
+PG/列存)]
+      O2[(Graph Store
+Neo4j/pggraph 可选)]
+    end
+
+    subgraph Eval[评估层]
+      E1[Rule Matcher]
+      E2[Condition Evaluator]
+      E3[Duration State Store]
+    end
+
+    subgraph Out[输出层]
+      A1[Notification Dispatcher]
+      A2[Action Orchestrator]
+      A3[(Activity/Audit Ledger)]
+    end
+
+    S1 --> C1 --> C2 --> C3
+    C3 --> O1
+    C3 --> O2
+    C2 --> E1 --> E2 --> E3
+    O1 --> E2
+    O2 --> E2
+    E2 --> A1
+    E2 --> A2
+    E2 --> A3
+```
+
+### 5.1.3 关键实现细节
+1. **投影构建**：按对象类型构建宽表/列存投影，关系类规则走图库查询。
+2. **一致性策略**：`at-least-once` 事件 + 投影幂等更新（source_version 去重）。
+3. **状态管理**：持续时长规则状态保存在流式状态库，定期 checkpoint。
+4. **审计**：每次评估写 `evaluation_id/monitor_version/input_snapshot_hash`。
+
+### 5.1.4 可行性评估
+- **性能可行**：评估不依赖源系统，P95 延迟更可控。
+- **可靠性可行**：Kafka 重放 + 投影重建可实现 RTO <= 1h。
+- **风险**：复制链路延迟导致“新鲜度”问题。
+- **缓解**：引入 freshness SLI（如投影延迟秒数）并触发降级策略。
+
+---
+
+## 5.2 非复制模式（Non-copy/Virtualized）详细设计
+
+### 5.2.1 适用场景与核心原则
+- 适用于数据主权强、复制受限、成本敏感或跨系统数据不易集中复制的场景。
+- 原则：**按需回源 + 快照一致性 + 回源失败补偿**。
+
+### 5.2.2 架构逻辑视图（非复制模式）
+
+```mermaid
+flowchart TB
+    subgraph Src[外部源系统]
+      S1[业务DB/数据服务]
+      S2[对象API/查询服务]
+    end
+
+    subgraph Runtime[监控运行时]
+      R1[Event Trigger]
+      R2[Input Resolver Adapter]
+      R3[Snapshot Cache]
+      R4[Condition Evaluator]
+      R5[Duration State Store]
+    end
+
+    subgraph Ctrl[控制与补偿]
+      C1[Source Health Checker]
+      C2[Delayed Evaluation Queue]
+      C3[Compensation Replayer]
+    end
+
+    subgraph Out[输出]
+      O1[Notification Dispatcher]
+      O2[Action Orchestrator]
+      O3[(Activity/Audit Ledger)]
+    end
+
+    R1 --> R2
+    R2 --> S1
+    R2 --> S2
+    R2 --> R3 --> R4 --> R5
+    R4 --> O1
+    R4 --> O2
+    R4 --> O3
+    C1 --> R2
+    C1 --> C2 --> C3 --> R4
+```
+
+### 5.2.3 关键实现细节
+1. **输入快照**：评估时生成 `input_snapshot_hash`，并记录 `source_version(lsn/watermark)`。
+2. **缓存策略**：对象输入短 TTL 缓存，避免重复回源。
+3. **容错补偿**：源不可用时把事件送入延迟队列，恢复后补评估。
+4. **持续时长规则**：仍由平台状态机维护，避免“每次回源重算持续时间”。
+
+### 5.2.4 可行性评估
+- **合规可行**：最小化复制，符合数据主权要求。
+- **成本可行**：减少存储成本，但增加回源调用成本。
+- **风险**：源系统抖动影响评估稳定性与延迟。
+- **缓解**：
+  - 引入 source SLA 监控与熔断；
+  - 关键规则可切换到“半复制热缓存”模式；
+  - 审计链路始终保留原始来源版本戳。
 
 ## 5.3 混合模式（推荐）
 
