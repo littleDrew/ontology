@@ -24,10 +24,12 @@ python3 /opt/codex/skills/.system/skill-installer/scripts/install-skill-from-git
 ### Method C (Optional): local package generation
 Only use when your environment explicitly requires packaged `.skill` files.
 
+The output directory can be any temporary local path (for example `/tmp/codex-skill-dist`).
+
 ```bash
 python3 /opt/codex/skills/.system/skill-creator/scripts/package_skill.py \
   skills/software-system-research-and-design \
-  skills/dist
+  /tmp/codex-skill-dist
 ```
 
 Repository policy recommendation:
