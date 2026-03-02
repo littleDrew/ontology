@@ -336,8 +336,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     D[Device/IoT/业务系统] --> H[IoT Hub/Event Hub]
-    H --> T[Azure Digital Twins
-(DTDL + Twin Graph)]
+    H --> T["Azure Digital Twins<br/>(DTDL + Twin Graph)"]
     T --> Q[Twin Query/API]
     H --> R[Event Routing]
     R --> F[Azure Functions/Stream Analytics]
@@ -371,8 +370,7 @@ flowchart LR
 flowchart TB
     subgraph Core[本体监控核心平台]
       A[Ontology/Object Store]
-      B[Rule Engine
-(阈值+持续时长)]
+      B["Rule Engine<br/>(阈值+持续时长)"]
       C[Activity Ledger]
     end
 
@@ -514,8 +512,7 @@ flowchart LR
 flowchart LR
     DB[(业务DB)] --> D[Debezium CDC]
     D --> NATS[NATS JetStream]
-    NATS --> E[Eval Service
-(CEL)]
+    NATS --> E["Eval Service<br/>(CEL)"]
     E --> P[Prefect Flows]
     P --> X[通知/动作]
     E --> A[(PostgreSQL
