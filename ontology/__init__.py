@@ -87,4 +87,7 @@ __all__ = [
     "function_action",
     "InMemoryGraphStore",
     "Neo4jGraphStore",
+    "create_app",
 ]
+
+from .main import create_app
