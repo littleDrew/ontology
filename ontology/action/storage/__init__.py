@@ -1,7 +1,3 @@
-"""Action storage package.
-
-Import repository.py for in-memory abstraction.
-sql_repository.py depends on SQLAlchemy.
-"""
+"""Storage package for ontology actions."""
 
 __all__: list[str] = []

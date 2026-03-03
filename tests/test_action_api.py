@@ -12,7 +12,7 @@ from ontology import (
     InMemoryActionRepository,
     InMemoryGraphStore,
 )
-from ontology.api import create_app
+from ontology.action.api import create_app
 
 
 def test_action_submit_and_get() -> None:

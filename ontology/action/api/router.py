@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Query
 
 from .schemas import ActionExecutionResponse, ActionSubmitRequest, ObjectResponse
-from ...edits import ObjectLocator
-from ...storage import GraphStore
+from ..storage.edits import ObjectLocator
+from ..storage.graph_store import GraphStore
 from ..storage.repository import ActionRepository
 from .service import ActionService
 

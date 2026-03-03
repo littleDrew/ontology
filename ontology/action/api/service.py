@@ -17,10 +17,10 @@ from ..models import (
     SideEffectOutbox,
 )
 from ..storage.repository import ActionRepository
-from ...apply import DataFunnelService
-from ...edits import edit_to_dict
+from ..storage.apply import DataFunnelService
+from ..storage.edits import edit_to_dict
 from ..notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
-from ...runtime import ActionRunner
+from ..execution.runtime import ActionRunner
 
 
 SideEffectHandler = Callable[[Dict[str, Any]], None]

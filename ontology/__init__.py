@@ -23,11 +23,11 @@ from .action.api.service import (
     SideEffectWorker,
     WebhookEffectHandler,
 )
-from .apply import DataFunnelResult, DataFunnelService, ValidationChain
-from .function_runtime import FunctionRuntime
+from .action.storage.apply import DataFunnelResult, DataFunnelService, ValidationChain
+from .action.execution.function_runtime import FunctionRuntime
 from .action.notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
-from .sandbox import BubblewrapConfig, BubblewrapRunner
-from .edits import (
+from .action.execution.sandbox import BubblewrapConfig, BubblewrapRunner
+from .action.storage.edits import (
     AddLinkEdit,
     AddObjectEdit,
     DeleteLinkEdit,
@@ -39,8 +39,8 @@ from .edits import (
     RemoveLinkEdit,
     TransactionEdit,
 )
-from .runtime import ActionRunner, Context, function_action
-from .storage import InMemoryGraphStore, Neo4jGraphStore
+from .action.execution.runtime import ActionRunner, Context, function_action
+from .action.storage.graph_store import InMemoryGraphStore, Neo4jGraphStore
 
 __all__ = [
     "AddLinkEdit",

@@ -16,8 +16,8 @@ from ontology import (
     NotificationLog,
     SideEffectOutbox,
 )
-from ontology.edits import AddObjectEdit, ObjectLocator, ModifyObjectEdit, TransactionEdit
-from ontology.sql_repository import SqlActionRepository
+from ontology.action.storage.edits import AddObjectEdit, ObjectLocator, ModifyObjectEdit, TransactionEdit
+from ontology.action.storage.sql_repository import SqlActionRepository
 
 
 def test_sql_repository_persists_records(tmp_path) -> None:

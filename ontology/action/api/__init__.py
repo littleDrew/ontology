@@ -1,8 +1,10 @@
-"""Action API package.
+"""Action API package."""
 
-Import modules directly for optional dependencies:
-- router.py requires fastapi
-- service.py has core action orchestration
-"""
 
-__all__: list[str] = []
+def create_app(*args, **kwargs):
+    from .router import create_app as _create_app
+
+    return _create_app(*args, **kwargs)
+
+
+__all__ = ["create_app"]

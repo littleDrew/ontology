@@ -1,9 +1,9 @@
 import pytest
 
 from ontology import FunctionRuntime
-from ontology.edits import ObjectInstance, ObjectLocator
-from ontology.runtime import function_action
-from ontology.sandbox import BubblewrapRunner
+from ontology.action.storage.edits import ObjectInstance, ObjectLocator
+from ontology.action.execution.runtime import function_action
+from ontology.action.execution.sandbox import BubblewrapRunner
 
 
 @function_action

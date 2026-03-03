@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, Optional
 
 from .runtime import ActionRunner
 from .sandbox import BubblewrapRunner
-from .edits import ObjectInstance
+from ..storage.edits import ObjectInstance
 
 
 class FunctionRuntime:
