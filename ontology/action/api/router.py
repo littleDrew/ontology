@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from .schemas import ActionExecutionResponse, ActionSubmitRequest, ObjectResponse
 from ..storage.edits import ObjectLocator
@@ -9,14 +9,16 @@ from ..storage.repository import ActionRepository
 from .service import ActionService
 
 
-def create_app(
+def create_router(
     store: GraphStore,
     action_service: ActionService | None = None,
     repository: ActionRepository | None = None,
-) -> FastAPI:
-    app = FastAPI(title="Ontology API")
+) -> APIRouter:
+    """Create action/object router bound to runtime dependencies."""
 
-    @app.get("/objects/{object_type}/{primary_key}", response_model=ObjectResponse)
+    router = APIRouter()
+
+    @router.get("/objects/{object_type}/{primary_key}", response_model=ObjectResponse)
     def get_object(object_type: str, primary_key: str) -> ObjectResponse:
         try:
             instance = store.get_object(ObjectLocator(object_type, primary_key))
@@ -29,7 +31,7 @@ def create_app(
             version=instance.version,
         )
 
-    @app.get("/objects/{object_type}", response_model=list[ObjectResponse])
+    @router.get("/objects/{object_type}", response_model=list[ObjectResponse])
     def list_objects(
         object_type: str,
         limit: int = Query(100, ge=1, le=1000),
@@ -46,7 +48,7 @@ def create_app(
             for instance in instances
         ]
 
-    @app.post("/actions/submit", response_model=ActionExecutionResponse)
+    @router.post("/actions/submit", response_model=ActionExecutionResponse)
     def submit_action(request: ActionSubmitRequest) -> ActionExecutionResponse:
         if action_service is None or repository is None:
             raise HTTPException(status_code=501, detail="Action service not configured")
@@ -63,7 +65,7 @@ def create_app(
             input_payload=execution.input_payload,
         )
 
-    @app.get("/actions/{execution_id}", response_model=ActionExecutionResponse)
+    @router.get("/actions/{execution_id}", response_model=ActionExecutionResponse)
     def get_action_execution(execution_id: str) -> ActionExecutionResponse:
         if repository is None:
             raise HTTPException(status_code=501, detail="Action repository not configured")
@@ -79,4 +81,4 @@ def create_app(
             input_payload=execution.input_payload,
         )
 
-    return app
+    return router

@@ -1,22 +1,41 @@
-"""Top-level application entrypoints for ontology.
-
-This module provides a stable, root-level API constructor while keeping
-HTTP routing implementation inside ``ontology.action.api``.
-"""
+"""Top-level application entrypoints for ontology."""
 
 from __future__ import annotations
 
-from .action.api import create_app as _create_action_app
+from typing import TYPE_CHECKING
+
+from .action.api.service import ActionService
+from .action.storage.graph_store import GraphStore
+from .action.storage.repository import ActionRepository
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 
-def create_app(*args, **kwargs):
+def create_app(
+    store: GraphStore,
+    action_service: ActionService | None = None,
+    repository: ActionRepository | None = None,
+) -> "FastAPI":
     """Create the ontology FastAPI application.
 
-    Delegates to ``ontology.action.api.create_app`` so callers can use a
-    simple root-level import path: ``from ontology.main import create_app``.
+    The app is composed from feature routers via ``include_router`` so that
+    new modules (e.g. define/search) can be added without bloating this file.
     """
 
-    return _create_action_app(*args, **kwargs)
+    from fastapi import FastAPI
+
+    from .action.api.router import create_router
+
+    app = FastAPI(title="Ontology API")
+    app.include_router(
+        create_router(
+            store=store,
+            action_service=action_service,
+            repository=repository,
+        )
+    )
+    return app
 
 
 __all__ = ["create_app"]
