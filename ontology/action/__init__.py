@@ -1,3 +1,3 @@
-"""Action domain package containing API and storage layers."""
+"""Ontology action package."""
 
-from .models import *
+__all__: list[str] = []

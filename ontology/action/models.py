@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence
 
-from ..edits import TransactionEdit
+from .storage.edits import TransactionEdit
 
 
 class ActionStatus(str, Enum):

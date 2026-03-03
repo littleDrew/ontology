@@ -10,8 +10,8 @@ from ontology import (
     ObjectInstance,
     ObjectLocator,
 )
-from ontology.runtime import function_action
-from ontology.storage import Neo4jGraphStore
+from ontology.action.execution.runtime import function_action
+from ontology.action.storage.graph_store import Neo4jGraphStore
 
 
 @function_action

@@ -18,7 +18,7 @@ from ..models import (
     NotificationLog,
     SideEffectOutbox,
 )
-from ...edits import edit_to_dict
+from .edits import edit_to_dict
 from .models import (
     ActionExecutionModel,
     ActionDefinitionModel,

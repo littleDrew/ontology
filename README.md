@@ -6,6 +6,25 @@ The Ontology Repository is a robust framework designed to manage, maintain, and 
 Detail docs in zread
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat-square&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/littleDrew/ontology)
 
+
+from ontology.main import create_app
+from ontology.main import create_app
+
+- **Storage/domain layer (`ontology/action/storage`)**: ontology edits, graph store abstraction/implementations, and transaction apply pipeline.
+- **Application/API layer (`ontology/action/api`)**: action orchestration, saga/side-effect handling, and HTTP schemas/router.
+- **Execution layer (`ontology/action/execution`)**: function/action runtime and sandbox execution concerns.
+- **Public compatibility layer (`ontology/<module>/__init__.py`)**: clear feature-oriented packages under `ontology/action/*` with fewer compatibility shims.
+
+High-level package map:
+
+```
+ontology/
+  action/
+    api/         # FastAPI router + action orchestration service
+    storage/     # edits, graph store, action repositories, SQL repository
+    execution/   # action runtime, function runtime, sandbox runner
+```
+
 ## Prerequisites
 - Python 3.10+
 - (Optional) Neo4j if you want to run the graph-backed store integration
@@ -28,7 +47,7 @@ The API factory expects a `GraphStore` instance. For a quick local demo, you can
 ```bash
 python - <<'PY'
 from ontology import InMemoryGraphStore
-from ontology.api import create_app
+from ontology.action.api import create_app
 import uvicorn
 
 store = InMemoryGraphStore()
@@ -46,7 +65,7 @@ If you want Action submission endpoints, pass an `ActionService` and repository:
 ```bash
 python - <<'PY'
 from ontology import ActionRunner, ActionService, InMemoryActionRepository, InMemoryGraphStore, DataFunnelService
-from ontology.api import create_app
+from ontology.action.api import create_app
 import uvicorn
 
 store = InMemoryGraphStore()

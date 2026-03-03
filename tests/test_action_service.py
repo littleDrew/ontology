@@ -21,8 +21,8 @@ from ontology import (
     WebhookDispatcher,
     WebhookEffectHandler,
 )
-from ontology.runtime import function_action
-from ontology.edits import ModifyObjectEdit, ObjectLocator, TransactionEdit, edit_to_dict
+from ontology.action.execution.runtime import function_action
+from ontology.action.storage.edits import ModifyObjectEdit, ObjectLocator, TransactionEdit, edit_to_dict
 
 
 @function_action

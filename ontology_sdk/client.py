@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from ontology.edits import ObjectInstance, ObjectLocator
-from ontology.storage import GraphStore
+from ontology.action.storage.edits import ObjectInstance, ObjectLocator
+from ontology.action.storage.graph_store import GraphStore
 
 from .edits import EditSession
 

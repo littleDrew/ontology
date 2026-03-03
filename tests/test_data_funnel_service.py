@@ -1,5 +1,5 @@
 from ontology import DataFunnelService, InMemoryGraphStore
-from ontology.edits import AddObjectEdit, ObjectLocator, TransactionEdit
+from ontology.action.storage.edits import AddObjectEdit, ObjectLocator, TransactionEdit
 
 
 def test_data_funnel_service_validator_runs() -> None:

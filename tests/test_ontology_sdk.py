@@ -6,7 +6,7 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from ontology import DataFunnelService, InMemoryGraphStore, ObjectLocator
-from ontology.api import create_app
+from ontology.main import create_app
 from ontology_sdk import FoundryClient
 
 

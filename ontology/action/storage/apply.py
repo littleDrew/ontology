@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional, Sequence
 
 from .edits import TransactionEdit
-from .storage import GraphStore
+from .graph_store import GraphStore
 
 
 @dataclass
