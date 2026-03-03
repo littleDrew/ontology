@@ -1,390 +1,314 @@
-# Function-backed Action 方案设计（对标 Palantir Ontology）
+# Function-backed Action 方案设计（分阶段版）
 
-> 目标：面向企业商用、高性能、可审计的本体 Action 系统。Action 由 Function 执行产生 Ontology Edit，再由 Action 引擎应用到本体存储（Neo4j），并具备可扩展的日志、审计、回滚、通知与外部副作用机制。
-
-## 1. 设计目标与约束
-
-### 1.1 目标
-- **高性能**：支持批处理执行、异步执行与水平扩展。
-- **强一致与可审计**：Action 执行结果可追踪、可回滚、可审计。
-- **商用可控**：完善的权限、沙箱、配额、审计、隔离与资源管理。
-- **可演进**：Ontology 与 Action、Function 版本化、兼容性治理。
-
-### 1.2 约束与假设
-- **语言与框架**：Python 实现核心服务，SQLAlchemy + MySQL 管理元数据与日志。
-- **对象实例存储**：对象实例与关系实例存储在 Neo4j。
-- **函数执行**：Function 在 **bubblewrap** 沙箱执行，不能直接修改 Ontology 对象，只能返回 **Ontology Edit**。
-
-## 2. 总体架构
-
-```
-┌─────────────────────┐        ┌───────────────────────────┐
-│  API Gateway / UI   │        │  External Systems         │
-└─────────┬───────────┘        └──────────┬────────────────┘
-          │                                │
-          ▼                                ▼
-┌──────────────────────────────────────────────────────────┐
-│                    Action Service                        │
-│  - Action Def/Version                                     │
-│  - Submission Criteria                                    │
-│  - Action Lifecycle                                        │
-│  - Action Log / Audit                                      │
-│  - Result / Notification                                   │
-└─────────┬────────────────────────────┬───────────────────┘
-          │                            │
-          ▼                            ▼
-┌───────────────────┐        ┌─────────────────────────────┐
-│ Function Runtime  │        │ Data Funnel Service         │
-│ - bwrap sandbox   │        │ - Conflict detection        │
-│ - resource quotas │        │ - Atomic apply              │
-│ - side effects    │        │ - Neo4j transaction         │
-└─────────┬─────────┘        └──────────┬──────────────────┘
-          │                              │
-          ▼                              ▼
-┌───────────────────┐        ┌─────────────────────────────┐
-│ MySQL (SQLAlchemy)│        │ Neo4j (Object Instance)     │
-│ - Action/Function │        │ - Nodes/Relations           │
-│ - Action log      │        │ - Object history (opt)      │
-│ - Outbox/Saga     │        │                             │
-│ - Ontology schema │        └─────────────────────────────┘
-└───────────────────┘
-```
-
-## 2.1 逻辑视图（Logical View）
-
-```mermaid
-flowchart TB
-  UI["Domain/UI Layer"] --> API["Action API and Submission Criteria"]
-  API --> Runtime["Function Runtime (sandbox)"]
-  Runtime --> SDK["Ontology SDK (objects/edit session)"]
-  SDK --> Edit["Edit Collection (TransactionEdit)"]
-  Edit --> Funnel["Data Funnel Service (GraphStore)"]
-  Funnel --> Neo4j["Neo4j Object/Relation Store"]
-  Funnel --> MySQL["Action Log + Side Effect Outbox + Saga State (MySQL)"]
-```
-
-## 2.2 运行视图（Runtime View）
-
-```mermaid
-sequenceDiagram
-  participant User
-  participant ActionService
-  participant Runtime
-  participant DataFunnelService
-  participant Neo4j
-  participant Outbox
-  participant SideEffectWorker
-  participant ExternalSystem
-
-  User->>ActionService: Submit Action
-  ActionService->>Outbox: Write outbox events (pending)
-  ActionService->>Runtime: Execute function in sandbox
-  Runtime-->>ActionService: TransactionEdit
-  ActionService->>DataFunnelService: Apply edits
-  DataFunnelService->>Neo4j: Write transaction
-  DataFunnelService-->>ActionService: Apply result
-  ActionService-->>User: Execution status
-  SideEffectWorker->>Outbox: Fetch pending events
-  SideEffectWorker->>ExternalSystem: Writeback/Notify
-  SideEffectWorker->>Outbox: Mark completed/failed
-```
-
-## 3. 关键概念与流程
-
-### 3.1 Function-backed Action
-- **Action**：定义用户触发的业务行为（如审批、修复、批量更新）。
-- **Function**：Action 的执行单元，运行在沙箱中，读取对象与参数，输出 **Ontology Edit**。
-- **Ontology Edit**：声明式变更集合（增删改对象、关系），由 Data Funnel Service 应用到 Neo4j。
-
-### 3.2 Action 生命周期
-1. **提交**：用户或系统触发 Action，Action Service 校验权限、提交条件与参数。
-2. **调度**：Action Service 调度 Function Runtime 执行（同步或异步）。
-3. **执行**：Function 在沙箱中运行，产生 Ontology Edit 与 Side Effects（可选）。
-4. **应用**：Data Funnel Service 原子性应用 Ontology Edit 到 Neo4j。
-5. **记录**：写入 Action Log（MySQL）与审计信息。
-6. **通知**：发送通知或 webhook。
-
-> 当前实现包含 InMemoryActionRepository + ActionService + SideEffectWorker 的最小执行链路，用于验证流程与测试覆盖。
-
-### 3.3 Ontology Edit 模型
-建议定义：
-- `create_object` / `update_object` / `delete_object`
-- `create_relation` / `delete_relation`
-- `upsert_object` / `patch_object`
-- `assertions`: 预条件、冲突检测、对象版本校验
-
-## 4. 数据存储设计（MySQL + SQLAlchemy）
-
-### 4.1 主要表设计（示意）
-
-**ActionDefinition**
-- id
-- name
-- description
-- input_schema (JSON)
-- output_schema (JSON)
-- function_ref (function_id)
-- submission_criteria (JSON)
-- version
-- status
-
-**FunctionDefinition**
-- id
-- name
-- runtime (python)
-- code_location (s3/git/registry)
-- execution_policy (resources, timeout)
-- schema (input/output JSON)
-- version
-
-**ActionExecution**
-- id
-- action_id
-- function_id
-- submitter
-- status (queued/running/succeeded/failed/reverted)
-- submitted_at, started_at, finished_at
-- input_payload (JSON)
-- output_payload (JSON)
-- ontology_edit (JSON)
-- error
-
-**ActionLog**
-- id
-- action_execution_id
-- event_type
-- payload
-- created_at
-
-**ActionDefinition**
-- id
-- name
-- version
-- description
-- function_name
-- input_schema
-- output_schema
-- active
-
-**FunctionDefinition**
-- id
-- name
-- version
-- runtime
-- code_ref
-- input_schema
-- output_schema
-
-**ActionState**
-- id
-- action_execution_id
-- status (pending/succeeded/failed)
-- intent_payload (edits + side effects)
-- created_at
-- updated_at
-
-**ActionRevert**
-- id
-- original_action_execution_id
-- revert_action_execution_id
-- status
-- created_at
-- reason
-
-**SideEffectOutbox**
-- id
-- action_execution_id
-- effect_type
-- payload
-- status
-- retry_count
-- created_at
-
-**NotificationLog**
-- id
-- action_execution_id
-- channel
-- subject
-- payload
-- created_at
-
-> **Outbox 说明**：Outbox 是一种事务外盒模式（Transactional Outbox）的实现。由于本体数据写入 Neo4j、Outbox 写入 MySQL，无法使用单一物理事务覆盖两个存储，因此采用**应用层状态机**与**对账恢复**保障“至少一次”投递：先写入 ActionState（PENDING），再提交 Neo4j Edit，最后在 MySQL 事务内更新 ActionState=SUCCESS 并写入 Outbox，异常场景由 Reconciler 对账补写 Outbox。其核心价值在于避免分布式事务，同时保证“至少一次”投递语义、可重试与可观测性。
-
-> 建议对 ActionExecution 增加索引：status、action_id、submitter、created_at。
-
-### 4.2 Neo4j 中对象实例建模
-- 节点：对象实例（ObjectInstance）
-- 关系：对象关系（RelationInstance）
-- 元信息：版本号、最后变更 ActionExecution id、时间戳
-- 增强：可选历史节点或事件日志（用于回滚、审计）
-
-## 5. Function 执行与 Sandbox（bubblewrap）
-
-### 5.1 沙箱设计
-- **隔离性**：bwrap 隔离文件系统、限制网络访问。
-- **权限**：只读挂载执行环境，函数工作目录为临时目录。
-- **资源限制**：CPU、内存、磁盘、打开文件数配额。
-- **超时控制**：强制执行超时、kill。
-- **当前实现**：提供 `BubblewrapRunner` 构建 bwrap 命令并执行 Python 函数入口脚本；在 bwrap 不可用时可回退到进程内运行（测试中会跳过）。
-
-### 5.2 Function SDK
-- 提供统一 Python SDK 供函数开发：
-  - `OntologyClient`：读取对象、关系、搜索
-  - `EditBuilder`：构造 Ontology Edit
-  - `Context`：执行上下文、Action 信息
-  - **Object Proxy（对象代理）**：函数参数注入对象代理，属性赋值与关系创建会被捕获为 Edit，避免用户手写 Edit JSON。
-  - **Decorator/AST 注册**：通过装饰器 + 类型注解扫描函数签名，自动生成 Action 表单与输入映射。
-  - **通用 SDK（FoundryClient）**：提供 `objects.get(object_type, primary_key)` 读取对象，以及 `edits()` 生成 Edit Session，支持 `objects.<Type>.create/edit` 风格的声明式编辑。
-
-### 5.3 执行模式
-- **单次执行**：处理单个对象或请求。
-- **批量执行（batch）**：输入对象集合，优化数据库访问与结果生成。
-
-### 5.5 Function Runtime 实现
-- **FunctionRuntime**：统一封装进程内执行与 bubblewrap 沙箱执行。
-- **进程内模式**：通过 ActionRunner 执行并返回 TransactionEdit。
-- **沙箱模式**：通过 BubblewrapRunner 执行模块函数入口并返回 JSON 结果（可扩展为返回 Edit 载荷）。
-
-### 5.4 FastAPI 服务与 SDK 集成
-- **FastAPI 后端**：提供对象读取接口（如 `GET /objects/{object_type}/{primary_key}`），作为 Ontology SDK 的数据访问入口。
-- **SDK 调用方式**：FoundryClient 使用 HTTP 客户端调用 FastAPI，获取对象实例并构造编辑会话，Edit 应用仍由 Data Funnel Service 负责。
-- **测试策略**：使用 FastAPI TestClient/httpx client 进行端到端验证，确保 SDK 与后端交互正常。
-
-## 6. Ontology Edit Data Funnel Service
-
-### 6.1 Apply 机制
-- **校验**：结构校验、权限校验、版本冲突检测（通过可插拔校验链实现）。
-- **事务**：Neo4j 写入使用事务，保证 Edit 原子性。
-- **失败回滚**：Apply 失败时 ActionExecution 标记失败。
-
-### 6.2 冲突检测策略
-- **版本号**：对象实例携带版本号，Edit 需提供预期版本。
-- **乐观锁**：版本不一致拒绝变更。
-- **可选策略**：支持 “last write wins” 或 “merge” 策略配置。
-
-### 6.3 Revert / Undo
-- **Action Revert**：记录 Edit 的逆向操作，支持执行回滚 Action。
-- **历史版本**：可选将每次变更写入 `ObjectHistory` 或关系历史表。
-
-## 7. Side Effects 与外部集成
-
-### 7.1 通知与 Webhook
-- 支持 Action 执行结束后触发通知（邮件、消息系统）。
-- Webhook 支持签名校验、重试机制。
-- 当前实现提供 `NotificationDispatcher`（内存记录）与 `WebhookDispatcher`（HTTP POST，支持可选签名）。
-
-### 7.2 外部副作用
-- Side Effect 由 Action 执行后触发，推荐由专门的 Side Effect Worker 异步执行。
-- 记录执行状态与重试日志。
-  - `notify`：发送通知消息（subject/body/channel）。
-  - `webhook`：发送 HTTP POST 并记录响应状态。
-  - **重试策略**：指数退避 + 最大重试次数，超限进入 dead-letter 状态。
-
-### 7.3 事务性保障与分布式一致性
-Action 往往同时包含 **本体 Edit 应用** 与 **外部系统写回**（如 MySQL、通知系统、第三方 API）。需要在一致性与可用性之间权衡，推荐以下策略组合：
-
-**策略 A：状态机 Outbox（State-machine Outbox）+ 异步 Side Effect**
-- **核心思路**：Action 使用 MySQL 作为**事务协调器**：先写入 ActionState(PENDING)，再提交 Neo4j Edit，最后在 MySQL 事务内更新 ActionState=SUCCESS 并写入 Outbox。  
-- **优势**：避免跨库分布式事务复杂度，同时通过对账恢复保证“至少一次”语义。
-- **落地**：
-  - 在 MySQL 中新增 `action_states` 与 `side_effect_outbox` 表。
-  - Phase1：写入 ActionState(PENDING) + intent payload（edits + side effects）。
-  - Phase2：提交 Neo4j Edit，并将 `last_modified_by_action_id` 写入节点属性（幂等标记）。
-  - Phase3：在 MySQL 事务中更新 ActionState=SUCCESS 并写入 Outbox。
-  - Reconciler 定期扫描 PENDING 的 ActionState，对账 Neo4j 的 `last_modified_by_action_id`，补写 Outbox 或标记 FAILED。
-
-**策略 B：Saga 编排（补偿事务）**
-- **核心思路**：Action 拆为多个步骤，若外部写回失败则执行补偿动作（回滚或反向编辑）。
-- **优势**：适用于可逆操作与多系统协调。
-- **落地**：
-  - ActionExecution 记录每个步骤状态。
-  - 提供 `CompensationEdit` 或 `RevertAction` 用于回滚本体修改。
-  - 外部系统写回通过 Saga Step 管理，失败时按逆序执行补偿动作。
-
-**策略 C：分布式事务（2PC / XA / SAGA 引擎）**
-- 对极少数“强一致”场景可引入分布式事务框架（如 Seata/TCC），但成本与运维复杂度高。
-- 建议将其限制在关键业务流程中，或通过“写回一致性 SLA”进行治理。
-
-**推荐实践组合**：优先采用 A（Outbox）+ B（Saga），极少数需要强一致场景才考虑 C。
-
-**当前实现说明**
-- **Outbox**：ActionService 在提交时可写入 outbox 事件；SideEffectWorker 负责消费并记录重试。
-- **Saga**：ActionDefinition 支持 `saga_steps` 与 `compensation_fn`。当执行或应用失败时触发补偿 Edit，并在外部写回失败时按逆序执行 Saga Step 补偿，必要时将 ActionExecution 标记为 `reverted`。
-
-**原子性分析（当前实现）**
-- 当前实现无法保证 **Ontology Edit（Neo4j）** 与 **外部系统写入（如 MySQL）** 的强原子性，因为它们位于不同的持久化系统中。
-- 采用 **Outbox + Saga** 的 **最终一致性**：Outbox 确保外部写回“至少一次”，Saga 在失败时执行补偿逻辑。
-- 若必须强一致，需要引入 2PC/TCC 或工作流引擎统一协调，但成本较高且会降低可用性。
-
-**代码层优化（当前实现）**
-- 引入 ActionState(PENDING/SUCCESS/FAILED) 作为本体与 Outbox 的协调状态机。
-- Outbox 事件在 Neo4j Edit 成功后，由 MySQL 事务写入，避免“外部写回成功但 Ontology 失败”的不一致。
-- Reconciler 基于 `last_modified_by_action_id` 对账补写 Outbox，保障“至少一次”语义。
-- 失败时执行 Saga Step 补偿，并对本体修改执行 `compensation_fn` 回滚。
-- 通知与回调的调用会记录 NotificationLog，Action Revert 会记录 ActionRevert 事件。
-
-**是否需要引入分布式 Saga 框架？**
-- **结论**：短期可不引入，采用应用内 Saga Orchestrator（当前实现）即可满足大多数场景；当出现大量跨系统协调、补偿复杂、需要可视化编排与超时监控时，再考虑引入专业框架。
-- **引入时机**：
-  - 跨系统步骤数量多、补偿链复杂且依赖人工介入。
-  - 需要图形化编排、全局事务追踪与 SLA 保障。
-  - 需要与消息中间件、定时任务紧密集成。
-- **候选方案**：
-  - 工作流引擎：Temporal / Cadence / Zeebe（BPMN）。
-  - Java 生态：Seata (TCC/Saga)。
-  - Python 生态：自研 Orchestrator + 消息队列（推荐在本阶段）。
-
-### 7.4 Side Effect 执行模型（建议）
-- **幂等性设计**：所有外部写回必须具备幂等 key（action_execution_id）。
-- **重试与熔断**：指数退避重试 + 失败告警 + dead-letter。
-- **可观测性**：Side Effect 独立日志与指标（成功率、延迟、失败原因）。
-
-## 11. API 与管理面
-
-- **Action API**
-  - `POST /actions/submit`：提交 Action，返回 execution_id。
-  - `GET /actions/{execution_id}`：查询执行状态。
-- **对象读取 API**：`GET /objects/{object_type}/{primary_key}`。
-
-## 8. 权限与审计
-
-### 8.1 权限模型
-- 角色权限（RBAC）：Action 执行权限、对象读写权限。
-- Function 执行权限与资源配额限制。
-
-### 8.2 审计与日志
-- 所有 ActionExecution 记录执行详情。
-- 关键事件写 ActionLog。
-- Revert 操作记录 `reverted` 事件，并保存补偿 Edit。
-
-## 9. 高性能与可扩展设计
-
-- **任务队列**：ActionExecution 支持异步调度（如 Celery / Kafka）。
-- **批量执行**：Function 支持批量处理。
-- **缓存**：函数可使用只读缓存，提高读取性能。
-- **水平扩展**：Action Service / Function Runtime 可独立扩展。
-
-## 10. 典型执行流程（示例）
-
-1. 用户提交 Action（审批订单）。
-2. Action Service 校验 submission criteria 与权限。
-3. 调度 Function Runtime 执行。
-4. Function 读取对象实例 -> 计算 -> 输出 Ontology Edit。
-5. Data Funnel Service 校验并应用 Ontology Edit 到 Neo4j。
-6. ActionExecution 更新状态并记录日志。
-7. 触发通知或 webhook。
-
-## 11. 下一步实施建议
-
-- ✅ 定义 Action / Function / Ontology Edit 的 Python SDK API（已实现通用 FoundryClient 与 EditSession）。
-- ✅ 实现基础 Action Service 与 Data Funnel Service（含 ActionExecution/Log/Outbox 内存实现）。
-- ✅ 提供 SQLAlchemy/MySQL 版本 Action/Log/Outbox 持久化（基础实现，需完善索引与迁移）。
-- ✅ 提供 FastAPI 服务用于对象读取接口，并由 SDK 通过 HTTP 调用。
-- ✅ 构建 Function Runtime + bubblewrap sandbox（基础实现与测试已接入）。
-- ✅ 接入 Neo4j Apply 事务与冲突检测。
- - ✅ 构建 Action Log 与 Revert 机制（已实现基础记录与回滚，持久化与审计查询待加强）。
- - ✅ 引入通知与 webhook 组件（已提供内存 dispatcher 与 webhook 发送，生产通道待接入）。
+> 目标：构建企业级、本体驱动、可审计的 Action 平台。Action 由 Function 在沙箱中执行并产出结构化变更，平台负责校验、应用、记录与（后续）跨系统一致性治理。
 
 ---
 
-**以上为第一版设计方案，后续可根据讨论完善实现细节与接口定义。**
+## 0. 总体设计原则（跨阶段）
+
+- **Function 只声明变更，不直接落库**：Function 运行在 Sandbox 内，仅返回 `OntologyEdit`（阶段 1/2）或 `SourceMutations + OntologyIndexEdits`（阶段 3）。
+- **先局部原子，再跨系统一致**：先保证图数据库内 Edit 原子性，再通过 Outbox/Saga 等机制处理跨库一致性。
+- **控制面与数据面分离**：Action 定义/执行日志属于控制面（Relational DB），对象实例/关系属于数据面（Graph DB）。
+- **可审计优先**：所有提交、执行、应用、补偿、重放都要可追踪。
+- **可演进而非一次到位**：阶段 1 聚焦主链路，阶段 2 增强治理，阶段 3 才讨论非复制语义下的 Action。
+
+---
+
+## 1. 三阶段范围定义（不混叠）
+
+### 阶段 1：Action 主流程（单服务边界内）
+
+> 不包含外部系统写回、通知、Webhook、分布式事务框架。
+
+**目标**
+- 打通主流程：定义 -> 校验 -> 沙箱执行 -> 生成 Edit -> 应用 -> 记录。
+- 固化可实现的语义边界（特别是事务边界、权限边界、冲突语义）。
+
+**包含能力**
+- ActionDefinition / FunctionDefinition / ActionExecution / ActionLog。
+- Ontology Action Service（编排）、Sandbox Service（执行）、Ontology Search Service（查询）、Ontology Instance Service（应用）。
+- Ontology SDK（沙箱内库，非独立服务）。
+- Graph DB（实例存储）+ Relational DB（元数据与日志）。
+
+**不包含能力**
+- 任何跨系统副作用与异步外部写回。
+- Outbox/SideEffectWorker/Saga/Reconciler。
+
+### Palantir 中相关介绍
+
+- Ontology 核心概念：<https://www.palantir.com/docs/foundry/ontology/core-concepts/>
+- Action Types 总览：<https://www.palantir.com/docs/foundry/action-types/overview/>
+- Action Types 入门：<https://www.palantir.com/docs/foundry/action-types/getting-started/>
+- Action Rules：<https://www.palantir.com/docs/foundry/action-types/rules/>
+- Submission Criteria：<https://www.palantir.com/docs/foundry/action-types/submission-criteria/>
+- Function-backed Actions 概览：<https://www.palantir.com/docs/foundry/action-types/function-actions-overview/>
+- Function-backed Actions 入门：<https://www.palantir.com/docs/foundry/action-types/function-actions-getting-started/>
+- Function-backed Actions 批执行：<https://www.palantir.com/docs/foundry/action-types/function-actions-batched-execution/>
+- Action 权限：<https://www.palantir.com/docs/foundry/action-types/permissions/>
+- Functions 总览：<https://www.palantir.com/docs/foundry/functions/overview/>
+- Functions 版本管理：<https://www.palantir.com/docs/foundry/functions/functions-versioning/>
+- Python Functions 入门：<https://www.palantir.com/docs/foundry/functions/python-getting-started/>
+- Python Functions on Objects：<https://www.palantir.com/docs/foundry/functions/python-functions-on-objects/>
+- Functions on Objects：<https://www.palantir.com/docs/foundry/functions/functions-on-objects/>
+- Foo Functions 入门：<https://www.palantir.com/docs/foundry/functions/foo-getting-started/>
+- Ontology Imports：<https://www.palantir.com/docs/foundry/functions/ontology-imports/>
+- API Objects/Links：<https://www.palantir.com/docs/foundry/functions/api-objects-links/>
+- API Object Sets：<https://www.palantir.com/docs/foundry/functions/api-object-sets/>
+- Python Ontology Edits：<https://www.palantir.com/docs/foundry/functions/python-ontology-edits/>
+- Object Edits 应用机制：<https://www.palantir.com/docs/foundry/object-edits/how-edits-applied/>
+- Object Edits 权限校验：<https://www.palantir.com/docs/foundry/object-edits/permission-checks/>
+- Object Edits 物化：<https://www.palantir.com/docs/foundry/object-edits/materializations/>
+
+---
+
+### 阶段 2：跨系统副作用与一致性治理
+
+> 阶段 1 稳定后引入；默认采用最终一致性，不把重型分布式事务框架作为前置。
+
+**目标**
+- 支持通知、Webhook、外部系统写回。
+- 在“跨 Graph/Relational/External”条件下保障可恢复一致性。
+
+**包含能力**
+- SideEffectOutbox + SideEffectWorker（至少一次语义）。
+- ActionState（PENDING/SUCCESS/FAILED）+ Reconciler 对账。
+- Saga Step + Compensation（补偿事务）。
+- 幂等键、重试退避、dead-letter、失败告警与指标。
+
+**分层落地建议**
+- 2A：Outbox + 幂等 + 重试 + 可观测性。
+- 2B：Saga 补偿与失败编排。
+- 2C（可选）：强一致关键流程接入 Temporal/Zeebe/Seata 等框架。
+
+### Palantir 中相关介绍
+
+- Side Effects 总览：<https://www.palantir.com/docs/foundry/action-types/side-effects-overview/>
+- Notifications：<https://www.palantir.com/docs/foundry/action-types/notifications/>
+- Set up Notification：<https://www.palantir.com/docs/foundry/action-types/set-up-notification/>
+- Webhooks：<https://www.palantir.com/docs/foundry/action-types/webhooks/>
+- Action Reverts：<https://www.palantir.com/docs/foundry/action-types/action-reverts/>
+- Action Log：<https://www.palantir.com/docs/foundry/action-types/action-log/>
+- Object Edits 用户历史：<https://www.palantir.com/docs/foundry/object-edits/user-edit-history/>
+
+---
+
+### 阶段 3：非复制（OSv2-like）模式下的 Action 语义
+
+> 本阶段仅定义 Action 行为模型；本体实例化/索引后端的完整演进方案在独立文档设计。
+
+**目标**
+- 将 Action 从“更新图中真值副本”演进为“提交外部真值变更 + 维护本体索引投影”。
+
+**语义调整**
+- Function 输出扩展为：`SourceMutations` + `OntologyIndexEdits`。
+- 状态维度扩展为：`pending_source -> source_committed -> index_applied -> reconciled`。
+
+**关键约束**
+- Source of Truth 在外部系统。
+- Graph 侧承载索引、关系与审计上下文，不承载完整真值副本。
+- 外部写回必须幂等（建议 key：`action_execution_id`）。
+
+### Palantir 中相关介绍
+
+- Ontology 核心概念：<https://www.palantir.com/docs/foundry/ontology/core-concepts/>
+- Functions on Objects：<https://www.palantir.com/docs/foundry/functions/functions-on-objects/>
+- Python Functions on Objects：<https://www.palantir.com/docs/foundry/functions/python-functions-on-objects/>
+- Python Ontology Edits：<https://www.palantir.com/docs/foundry/functions/python-ontology-edits/>
+- Object Edits 物化：<https://www.palantir.com/docs/foundry/object-edits/materializations/>
+
+---
+
+## 2. 阶段 1 详细设计
+
+## 2.1 组件职责
+
+- **Web UI / Monitor**：发起 Action、查看状态、查看审计轨迹。
+- **Ontology Action Service**：
+  - 校验 submission criteria / permissions。
+  - 读取 ActionDefinition/FunctionDefinition。
+  - 调度 Sandbox 执行 Function。
+  - 调用 Ontology Instance Service 应用 Edit。
+  - 写 ActionExecution / ActionLog。
+- **Sandbox Service**：在 bwrap 中执行 Function 代码。
+- **Ontology SDK（in-process library）**：被 Sandbox 内函数调用；负责查询对象、构建 Edit。
+- **Ontology Search Service**：处理读取查询（对象/关系/对象集）。
+- **Ontology Instance Service**：校验并应用 OntologyEdit，保证 Graph 事务内原子性。
+- **Ontology Storage Database（Graph）**：对象实例/关系实例。
+- **Action Metadata Database（Relational）**：Action 定义、执行状态、日志。
+
+## 2.2 运行视图（阶段 1）
+
+```mermaid
+flowchart LR
+  UI["Web UI / Monitor"] --> AS["Ontology Action Service"]
+  AS -->|校验 criteria / 权限| AS
+  AS -->|读取定义与写执行日志| RDB["Action Metadata DB (Relational)"]
+  AS --> SB["Sandbox Service"]
+  SB --> SDK["Ontology SDK (in-process library)"]
+  SDK --> SS["Ontology Search Service"]
+  SS --> GDB["Ontology Storage DB (Graph)"]
+  SB -->|返回 OntologyEdit| AS
+  AS --> IS["Ontology Instance Service"]
+  IS -->|Graph Transaction| GDB
+  AS --> UI
+```
+
+## 2.3 交互时序（阶段 1）
+
+```mermaid
+sequenceDiagram
+  participant UI as Web UI/Monitor
+  participant AS as Ontology Action Service
+  participant RDB as Action Metadata DB
+  participant SB as Sandbox Service
+  participant SDK as Ontology SDK
+  participant SS as Ontology Search Service
+  participant IS as Ontology Instance Service
+  participant GDB as Graph DB
+
+  UI->>AS: Submit Action(input)
+  AS->>RDB: Load ActionDefinition/FunctionDefinition
+  AS->>AS: Validate submission criteria + permissions
+  AS->>RDB: Create ActionExecution(status=running)
+  AS->>SB: Execute Function(input, context)
+  SB->>SDK: Query objects + build edit session
+  SDK->>SS: Search request
+  SS->>GDB: Read objects/relations
+  GDB-->>SS: Result
+  SS-->>SDK: Data
+  SDK-->>SB: Object proxies + edit builder
+  SB-->>AS: TransactionEdit / error
+  AS->>IS: Apply TransactionEdit
+  IS->>GDB: Begin tx -> validate -> write -> commit/rollback
+  GDB-->>IS: apply result
+  IS-->>AS: success/failure
+  AS->>RDB: Update ActionExecution + append ActionLog
+  AS-->>UI: Execution status
+```
+
+## 2.4 原子性与一致性边界
+
+- **Graph 内原子性**：单次 Edit apply 必须在同一 Graph 事务中提交或回滚。
+- **跨库非原子性（阶段 1 可接受）**：Graph 与 Relational 之间不保证强原子。
+- **后续治理路径**：阶段 2 使用 Outbox + Reconciler + Saga 进行最终一致性收敛。
+
+## 2.5 阶段 1 数据模型最小集
+
+- `ActionDefinition(id, name, version, input_schema, output_schema, function_ref, submission_criteria, status)`
+- `FunctionDefinition(id, name, version, runtime, code_ref, execution_policy, input_schema, output_schema)`
+- `ActionExecution(id, action_id, function_id, submitter, status, input_payload, output_payload, ontology_edit, error, submitted_at, started_at, finished_at)`
+- `ActionLog(id, action_execution_id, event_type, payload, created_at)`
+
+**索引建议**
+- `ActionExecution(status, action_id, submitter, submitted_at)`
+- `ActionLog(action_execution_id, created_at)`
+
+## 2.6 阶段 1 执行安全与治理
+
+- **沙箱隔离**：文件系统隔离、最小权限、临时目录执行。
+- **网络策略**：默认禁止外网，仅允许访问必要内网端点（如 Search Service）。
+- **资源治理**：CPU/Memory/Disk/FD 配额与超时终止。
+- **编辑约束**：Function 不允许直接写存储，只能返回结构化 Edit。
+- **冲突检测**：基于对象版本号的乐观锁；默认 reject，后续可扩展 LWW/merge。
+
+## 2.7 阶段 1 验收标准（M1）
+
+- E2E 主链路稳定：提交、执行、应用、状态可追踪。
+- 失败可定位：可区分 criteria 失败、函数执行失败、编辑冲突失败、应用失败。
+- 图库事务语义正确：发生异常时无部分写入。
+- 元数据闭环完整：ActionExecution 与 ActionLog 可完整重建一次执行轨迹。
+
+---
+
+## 3. 阶段 2 设计（副作用与一致性）
+
+## 3.1 策略 A：State-machine Outbox（默认）
+
+1. 写 `ActionState(PENDING)` + `intent_payload`。  
+2. 提交 Graph Edit。  
+3. 在 Relational 事务内更新 `ActionState=SUCCESS` 并写 `SideEffectOutbox`。  
+4. Reconciler 扫描异常状态并补写/修复。
+
+## 3.2 策略 B：Saga（补偿）
+
+- 每个跨系统步骤配置 `forward` 与 `compensation`。
+- 失败时逆序补偿，记录补偿日志与最终状态（failed/reverted）。
+
+## 3.3 策略 C：分布式事务框架（可选）
+
+仅在满足以下条件时引入：
+- 强一致 SLA 明确且高价值；
+- 步骤链条长、补偿复杂、人工介入多；
+- 需要统一编排可视化与超时治理。
+
+---
+
+## 4. 阶段 3 设计（非复制 Action 语义）
+
+## 4.1 执行模型
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant AS as Action Service
+  participant RT as Runtime
+  participant SC as Source Connector
+  participant IA as Index Applier
+  participant RC as Reconciler
+
+  U->>AS: Submit Action
+  AS->>RT: Execute Function
+  RT-->>AS: SourceMutations + OntologyIndexEdits
+  AS->>SC: Apply SourceMutations
+  SC-->>AS: source_committed
+  AS->>IA: Apply OntologyIndexEdits
+  IA-->>AS: index_applied
+  RC->>AS: reconcile/checkpoint
+```
+
+## 4.2 最小状态机建议
+
+- `pending_source`
+- `source_committed`
+- `index_applied`
+- `reconciled`
+- `failed`
+
+## 4.3 失败处置
+
+- Source 成功 / Index 失败：重放 IndexEdits + 对账修复。
+- Source 失败：不应用 IndexEdits，按错误类型重试或终止。
+- Source 部分成功：走 Saga 补偿或人工介入队列。
+
+---
+
+## 5. API 与里程碑
+
+### 5.1 API（按阶段）
+
+**阶段 1（必需）**
+- `POST /actions/submit`
+- `GET /actions/{execution_id}`
+- `GET /objects/{object_type}/{primary_key}`
+
+**阶段 2（增强）**
+- `POST /actions/{execution_id}/retry-side-effects`
+- `POST /actions/{execution_id}/reconcile`
+- `POST /actions/{execution_id}/compensate`
+
+**阶段 3（非复制 Action）**
+- `GET /actions/{execution_id}/consistency`
+- `POST /actions/{execution_id}/replay-index`
+
+### 5.2 里程碑
+
+- **M1（阶段 1）**：主链路稳定 + 事务边界清晰 + 审计闭环。
+- **M2（阶段 2A/2B）**：Outbox/Saga/Reconciler 可运行并可观测。
+- **M3（阶段 2C，可选）**：关键流程接入框架化编排并验证收益。
+- **M4（阶段 3）**：非复制模式 Action 双通道（source/index）可稳定收敛。
+
+---
+
+## 6. 结论
+
+该设计将 Action 能力拆分为“可落地、可验证、可演进”的三阶段路径：先完成阶段 1 主链路，再建设阶段 2 一致性治理，最后扩展阶段 3 非复制语义。
