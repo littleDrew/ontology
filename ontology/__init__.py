@@ -1,6 +1,6 @@
 """Ontology action and edit runtime."""
 
-from .action_models import (
+from .action.models import (
     ActionDefinition,
     ActionExecution,
     ActionLog,
@@ -13,8 +13,8 @@ from .action_models import (
     SagaStep,
     SideEffectOutbox,
 )
-from .action_repository import ActionRepository, InMemoryActionRepository
-from .action_service import (
+from .action.storage.repository import ActionRepository, InMemoryActionRepository
+from .action.api.service import (
     ActionReconciler,
     ActionService,
     NotificationEffectHandler,
@@ -25,7 +25,7 @@ from .action_service import (
 )
 from .apply import DataFunnelResult, DataFunnelService, ValidationChain
 from .function_runtime import FunctionRuntime
-from .notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
+from .action.notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
 from .sandbox import BubblewrapConfig, BubblewrapRunner
 from .edits import (
     AddLinkEdit,
