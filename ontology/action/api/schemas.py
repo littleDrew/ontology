@@ -12,6 +12,14 @@ class ObjectResponse(BaseModel):
     version: Optional[int]
 
 
+class ActionApplyRequest(BaseModel):
+    submitter: str
+    input_payload: Dict[str, Any]
+    input_instances: Optional[Dict[str, Dict[str, Any]]] = None
+    version: Optional[int] = None
+    client_request_id: Optional[str] = None
+
+
 class ActionSubmitRequest(BaseModel):
     action_name: str
     version: Optional[int] = None

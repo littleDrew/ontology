@@ -14,6 +14,7 @@ from .action.api.domain_models import (
     SideEffectOutbox,
 )
 from .action.storage.repository import ActionRepository, InMemoryActionRepository
+from .action.api.repair import ActionRepairJob, RepairResult
 from .action.api.service import (
     ActionReconciler,
     ActionService,
@@ -23,7 +24,7 @@ from .action.api.service import (
     SideEffectWorker,
     WebhookEffectHandler,
 )
-from .action.storage.apply import DataFunnelResult, DataFunnelService, ValidationChain
+from .instance.api.service import DataFunnelResult, DataFunnelService, ValidationChain, InstanceService
 from .action.execution.function_runtime import FunctionRuntime
 from .action.execution.notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
 from .action.execution.sandbox import BubblewrapConfig, BubblewrapRunner
@@ -40,7 +41,9 @@ from .action.storage.edits import (
     TransactionEdit,
 )
 from .action.execution.runtime import ActionRunner, Context, function_action
-from .action.storage.graph_store import InMemoryGraphStore, Neo4jGraphStore
+from ontology_sdk import OntologyEdits
+from .action.config import ActionFeatureFlags
+from .instance.storage.graph_store import InMemoryGraphStore, Neo4jGraphStore
 
 __all__ = [
     "AddLinkEdit",
@@ -56,6 +59,7 @@ __all__ = [
     "DataFunnelService",
     "DataFunnelResult",
     "ValidationChain",
+    "InstanceService",
     "ActionDefinition",
     "ActionExecution",
     "ActionLog",
@@ -70,6 +74,8 @@ __all__ = [
     "ActionRepository",
     "InMemoryActionRepository",
     "ActionService",
+    "ActionRepairJob",
+    "RepairResult",
     "ActionReconciler",
     "NotificationEffectHandler",
     "SideEffect",
@@ -83,7 +89,9 @@ __all__ = [
     "BubblewrapConfig",
     "BubblewrapRunner",
     "ActionRunner",
+    "ActionFeatureFlags",
     "Context",
+    "OntologyEdits",
     "function_action",
     "InMemoryGraphStore",
     "Neo4jGraphStore",

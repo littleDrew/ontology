@@ -142,3 +142,31 @@ def _locator_from_target(target: EditableObject | ObjectInstance) -> ObjectLocat
     if isinstance(target, EditableObject):
         return target.locator()
     return target.locator()
+
+
+class OntologyEdits:
+    """SDK capture container for function-side edit intent collection."""
+
+    def __init__(self) -> None:
+        self._recorder = EditRecorder()
+
+    def add_object(self, object_type: str, primary_key: str, properties: Dict[str, Any]) -> None:
+        edit = self._recorder.add_object(object_type, primary_key)
+        edit.properties.update(properties)
+
+    def modify_object(self, locator: ObjectLocator, properties: Dict[str, Any]) -> None:
+        self._recorder.modify_object(locator, properties)
+
+    def delete_object(self, locator: ObjectLocator) -> None:
+        self._recorder.delete_object(locator)
+
+    def add_link(self, link_type: str, from_locator: ObjectLocator, to_locator: ObjectLocator) -> None:
+        self._recorder.add_link(link_type, from_locator, to_locator)
+
+    def remove_link(self, link_type: str, from_locator: ObjectLocator, to_locator: ObjectLocator) -> None:
+        self._recorder.delete_link(link_type, from_locator, to_locator)
+
+    def get_transaction_edit(self) -> TransactionEdit:
+        from ontology.action.storage.edits import normalize_transaction_edit
+
+        return normalize_transaction_edit(self._recorder.flush())

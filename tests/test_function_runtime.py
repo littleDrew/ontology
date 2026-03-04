@@ -27,3 +27,8 @@ def test_function_runtime_sandbox_unavailable() -> None:
     runtime = FunctionRuntime(sandbox_runner=runner)
     with pytest.raises(RuntimeError):
         runtime.execute_in_sandbox("module", "fn", {"x": 1})
+
+
+def test_function_runtime_has_inline_sandbox_api() -> None:
+    runtime = FunctionRuntime()
+    assert hasattr(runtime, "execute_inline_in_sandbox")

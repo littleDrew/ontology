@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Dict, List, Protocol, Tuple
+
+from ..utils import now_utc
 
 from ..api.domain_models import (
     ActionDefinition,
@@ -11,6 +14,7 @@ from ..api.domain_models import (
     ActionRevert,
     ActionState,
     ActionStateStatus,
+    ActionStatus,
     FunctionDefinition,
     NotificationLog,
     SideEffectOutbox,
@@ -55,6 +59,13 @@ class ActionRepository(Protocol):
     ) -> None: ...
 
     def list_stale_action_states(self, cutoff_seconds: int) -> List[ActionState]: ...
+
+    # Control-plane helper for repair jobs.
+    def list_stale_executions(
+        self,
+        statuses: Sequence[ActionStatus],
+        cutoff_seconds: int,
+    ) -> List[ActionExecution]: ...
 
 
 @dataclass
@@ -119,7 +130,7 @@ class InMemoryActionRepository:
         for entry in sorted(self.outbox.values(), key=lambda item: item.created_at):
             if entry.status != "pending":
                 continue
-            if entry.next_attempt_at > datetime.utcnow():
+            if entry.next_attempt_at > now_utc():
                 continue
             entry.status = "in_progress"
             claimed.append(entry)
@@ -143,9 +154,25 @@ class InMemoryActionRepository:
             self.add_outbox(entry)
 
     def list_stale_action_states(self, cutoff_seconds: int) -> List[ActionState]:
-        cutoff = datetime.utcnow().timestamp() - cutoff_seconds
+        cutoff = now_utc().timestamp() - cutoff_seconds
         return [
             state
             for state in self.action_states.values()
             if state.status == ActionStateStatus.pending and state.created_at.timestamp() <= cutoff
         ]
+
+    def list_stale_executions(
+        self,
+        statuses: Sequence[ActionStatus],
+        cutoff_seconds: int,
+    ) -> List[ActionExecution]:
+        cutoff = now_utc().timestamp() - cutoff_seconds
+        status_values = {status.value for status in statuses}
+        stale: list[ActionExecution] = []
+        for execution in self.executions.values():
+            if execution.status.value not in status_values:
+                continue
+            time_ref = execution.started_at or execution.submitted_at
+            if time_ref.timestamp() <= cutoff:
+                stale.append(execution)
+        return stale

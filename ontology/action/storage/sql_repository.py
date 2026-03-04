@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, func, select, update
 from sqlalchemy.orm import Session
+
+from ..utils import now_utc
 
 from ..api.domain_models import (
     ActionExecution,
@@ -255,7 +258,7 @@ class SqlActionRepository:
             stmt = (
                 select(OutboxModel)
                 .where(OutboxModel.status == "pending")
-                .where(OutboxModel.next_attempt_at <= datetime.utcnow())
+                .where(OutboxModel.next_attempt_at <= now_utc())
                 .order_by(OutboxModel.created_at)
                 .limit(limit)
             )
@@ -265,7 +268,7 @@ class SqlActionRepository:
                 update_stmt = (
                     update(OutboxModel)
                     .where(OutboxModel.id == row.id, OutboxModel.status == "pending")
-                    .values(status="in_progress", updated_at=datetime.utcnow())
+                    .values(status="in_progress", updated_at=now_utc())
                 )
                 result = session.execute(update_stmt)
                 if result.rowcount:
@@ -280,7 +283,7 @@ class SqlActionRepository:
                             max_retries=row.max_retries,
                             next_attempt_at=row.next_attempt_at,
                             created_at=row.created_at,
-                            updated_at=datetime.utcnow(),
+                            updated_at=now_utc(),
                         )
                     )
             session.commit()
@@ -348,7 +351,7 @@ class SqlActionRepository:
             session.commit()
 
     def list_stale_action_states(self, cutoff_seconds: int) -> list[ActionState]:
-        cutoff = datetime.utcnow() - timedelta(seconds=cutoff_seconds)
+        cutoff = now_utc() - timedelta(seconds=cutoff_seconds)
         with Session(self._engine) as session:
             stmt = (
                 select(ActionStateModel)
@@ -365,6 +368,40 @@ class SqlActionRepository:
                 intent_payload=row.intent_payload,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def list_stale_executions(
+        # Use started_at when available to avoid repairing newly-submitted but not-started work.
+        self,
+        statuses: Sequence[ActionStatus],
+        cutoff_seconds: int,
+    ) -> list[ActionExecution]:
+        cutoff = now_utc() - timedelta(seconds=cutoff_seconds)
+        status_values = [status.value for status in statuses]
+        with Session(self._engine) as session:
+            stmt = (
+                select(ActionExecutionModel)
+                .where(ActionExecutionModel.status.in_(status_values))
+                .where(func.coalesce(ActionExecutionModel.started_at, ActionExecutionModel.submitted_at) <= cutoff)
+                .order_by(ActionExecutionModel.submitted_at)
+            )
+            rows = session.execute(stmt).scalars().all()
+        return [
+            ActionExecution(
+                execution_id=row.id,
+                action_name=row.action_name,
+                submitter=row.submitter,
+                status=ActionStatus(row.status),
+                submitted_at=row.submitted_at,
+                input_payload=row.input_payload,
+                output_payload=row.output_payload or {},
+                ontology_edit=None,
+                compensation_edit=None,
+                error=row.error,
+                started_at=row.started_at,
+                finished_at=row.finished_at,
             )
             for row in rows
         ]

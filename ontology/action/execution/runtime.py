@@ -12,6 +12,7 @@ from ..storage.edits import (
     ObjectLocator,
     OntologyEdit,
     TransactionEdit,
+    normalize_transaction_edit,
 )
 
 
@@ -37,7 +38,7 @@ class EditBuilder:
         for locator, properties in self._pending_modifications.items():
             self._edits.append(ModifyObjectEdit(locator=locator, properties=dict(properties)))
         self._pending_modifications.clear()
-        return TransactionEdit(edits=list(self._edits))
+        return normalize_transaction_edit(TransactionEdit(edits=list(self._edits)))
 
 
 class ObjectProxy:
@@ -89,6 +90,9 @@ class ActionRunner:
 
     def register(self, name: str, fn: Callable[..., Any]) -> None:
         self._registry[name] = fn
+
+    def resolve(self, name: str) -> Callable[..., Any] | None:
+        return self._registry.get(name)
 
     def execute(
         self,

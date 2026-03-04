@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from ontology.action.storage.edits import ObjectInstance, ObjectLocator
-from ontology.action.storage.graph_store import GraphStore
+from ontology.instance.storage.graph_store import GraphStore
 
 from .edits import EditSession
 

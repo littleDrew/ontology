@@ -1,10 +1,11 @@
-from datetime import datetime
+from ontology.action.utils import now_utc
 
 from ontology import (
     ActionDefinition,
     ActionRunner,
     ActionReconciler,
     ActionService,
+    ActionFeatureFlags,
     ActionState,
     ActionStateStatus,
     DataFunnelService,
@@ -36,7 +37,7 @@ def test_action_service_executes_and_emits_outbox() -> None:
     store = InMemoryGraphStore()
     store.add_object("Loan", "loan-2", {"status": "PENDING"})
     repo = InMemoryActionRepository()
-    service = ActionService(repo, ActionRunner(), DataFunnelService(store))
+    service = ActionService(repo, ActionRunner(), DataFunnelService(store), feature_flags=ActionFeatureFlags(side_effects_enabled=True, saga_enabled=True, revert_enabled=True))
 
     definition = ActionDefinition(
         name="UpdateStatus",
@@ -63,6 +64,11 @@ def test_action_service_executes_and_emits_outbox() -> None:
     updated = store.get_object(ObjectLocator("Loan", "loan-2"))
     assert updated.properties["status"] == "APPROVED"
     assert any(entry.effect_type == "notify" for entry in repo.outbox.values())
+    event_types = [log.event_type for log in repo.logs if log.execution_id == execution.execution_id]
+    assert "function_started" in event_types
+    assert "function_finished" in event_types
+    assert "apply_started" in event_types
+    assert "apply_succeeded" in event_types
 
 
 def test_side_effect_handlers_dispatch() -> None:
@@ -98,8 +104,8 @@ def test_side_effect_worker_handles_outbox() -> None:
             execution_id="exec-1",
             effect_type="notify",
             payload={"message": "hello"},
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=now_utc(),
+            updated_at=now_utc(),
         )
     )
     worker.drain()
@@ -121,8 +127,8 @@ def test_side_effect_worker_applies_backoff_and_dead_letter() -> None:
         effect_type="notify",
         payload={"message": "hello"},
         max_retries=2,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=now_utc(),
+        updated_at=now_utc(),
     )
     repo.add_outbox(entry)
 
@@ -130,7 +136,7 @@ def test_side_effect_worker_applies_backoff_and_dead_letter() -> None:
     assert repo.outbox["out-2"].status == "pending"
     assert repo.outbox["out-2"].retry_count == 1
 
-    repo.outbox["out-2"].next_attempt_at = datetime.utcnow()
+    repo.outbox["out-2"].next_attempt_at = now_utc()
     worker.drain()
     assert repo.outbox["out-2"].status == "dead_letter"
 
@@ -156,8 +162,8 @@ def test_action_reconciler_backfills_outbox() -> None:
             "edits": edit_to_dict(edit),
             "side_effects": [{"effect_type": "notify", "payload": {"message": "done"}}],
         },
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=now_utc(),
+        updated_at=now_utc(),
     )
     repo.add_action_state(state)
 
@@ -171,7 +177,7 @@ def test_action_service_saga_compensation() -> None:
     store = InMemoryGraphStore()
     store.add_object("Loan", "loan-3", {"status": "PENDING"})
     repo = InMemoryActionRepository()
-    service = ActionService(repo, ActionRunner(), DataFunnelService(store))
+    service = ActionService(repo, ActionRunner(), DataFunnelService(store), feature_flags=ActionFeatureFlags(side_effects_enabled=True, saga_enabled=True, revert_enabled=True))
 
     def compensate(instances, payload):
         loan = instances["loan"]
@@ -212,7 +218,7 @@ def test_action_service_saga_steps_compensate_external() -> None:
     store = InMemoryGraphStore()
     store.add_object("Loan", "loan-4", {"status": "PENDING"})
     repo = InMemoryActionRepository()
-    service = ActionService(repo, ActionRunner(), DataFunnelService(store))
+    service = ActionService(repo, ActionRunner(), DataFunnelService(store), feature_flags=ActionFeatureFlags(side_effects_enabled=True, saga_enabled=True, revert_enabled=True))
     external_log = []
 
     def step_one(instances, payload):
@@ -252,13 +258,16 @@ def test_action_service_saga_steps_compensate_external() -> None:
 
     assert execution.status.value == "failed"
     assert external_log == ["writeback-1", "writeback-2", "compensate-2", "compensate-1"]
+    failure_logs = [log for log in repo.logs if log.execution_id == execution.execution_id and log.event_type == "execution_failed"]
+    assert len(failure_logs) == 1
+    assert failure_logs[0].payload["failed_stage"] in {"executing", "applying"}
 
 
 def test_action_service_revert_records_revert() -> None:
     store = InMemoryGraphStore()
     store.add_object("Loan", "loan-6", {"status": "APPROVED"})
     repo = InMemoryActionRepository()
-    service = ActionService(repo, ActionRunner(), DataFunnelService(store))
+    service = ActionService(repo, ActionRunner(), DataFunnelService(store), feature_flags=ActionFeatureFlags(side_effects_enabled=True, saga_enabled=True, revert_enabled=True))
 
     execution = service.submit(
         definition=ActionDefinition(
@@ -282,3 +291,33 @@ def test_action_service_revert_records_revert() -> None:
     updated = store.get_object(ObjectLocator("Loan", "loan-6"))
     assert updated.properties["status"] == "REVERTED"
     assert repo.reverts[-1].original_execution_id == execution.execution_id
+
+
+def test_phase2_features_disabled_by_default() -> None:
+    store = InMemoryGraphStore()
+    store.add_object("Loan", "loan-100", {"status": "PENDING"})
+    repo = InMemoryActionRepository()
+    service = ActionService(repo, ActionRunner(), DataFunnelService(store))
+
+    definition = ActionDefinition(
+        name="UpdateNoSideEffect",
+        description="Update status",
+        function_name="update_status",
+    )
+
+    execution = service.submit(
+        definition=definition,
+        submitter="user-1",
+        input_payload={"status": "APPROVED"},
+    )
+
+    loan_instance = store.get_object(ObjectLocator("Loan", "loan-100"))
+    service.execute(
+        execution,
+        definition,
+        update_status,
+        {"loan": loan_instance},
+        side_effects=[SideEffect(effect_type="notify", payload={"message": "done"})],
+    )
+
+    assert repo.outbox == {}

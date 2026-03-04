@@ -183,3 +183,78 @@ def edit_from_dict(data: Dict[str, Any]) -> OntologyEdit:
             to_locator=locator_from_dict(data["to_locator"]),
         )
     raise ValueError(f"Unsupported edit type: {edit_type}")
+
+
+
+def _locator_key(locator: ObjectLocator) -> tuple[str, str]:
+    return (locator.object_type, locator.primary_key)
+
+
+def normalize_transaction_edit(transaction: TransactionEdit) -> TransactionEdit:
+    """Normalize captured edits for deterministic apply semantics.
+
+    Rules:
+    - create then delete same object => both removed
+    - multiple modify same object => merged with last-write-wins per property
+    - duplicate links deduped; add/remove same link in same tx cancels out
+    """
+
+    add_objects: dict[tuple[str, str], AddObjectEdit] = {}
+    modify_objects: dict[tuple[str, str], ModifyObjectEdit] = {}
+    delete_objects: dict[tuple[str, str], DeleteObjectEdit] = {}
+    add_links: dict[tuple[str, tuple[str, str], tuple[str, str]], AddLinkEdit] = {}
+    remove_links: dict[tuple[str, tuple[str, str], tuple[str, str]], RemoveLinkEdit] = {}
+
+    for edit in transaction.edits:
+        if isinstance(edit, AddObjectEdit):
+            key = (edit.object_type, edit.primary_key)
+            add_objects[key] = edit
+            continue
+
+        if isinstance(edit, ModifyObjectEdit):
+            key = _locator_key(edit.locator)
+            if key in delete_objects:
+                continue
+            existing = modify_objects.get(key)
+            if existing is None:
+                modify_objects[key] = ModifyObjectEdit(locator=edit.locator, properties=dict(edit.properties))
+            else:
+                merged = dict(existing.properties)
+                merged.update(edit.properties)
+                locator = edit.locator if edit.locator.version is not None else existing.locator
+                modify_objects[key] = ModifyObjectEdit(locator=locator, properties=merged)
+            continue
+
+        if isinstance(edit, DeleteObjectEdit):
+            key = _locator_key(edit.locator)
+            if key in add_objects:
+                add_objects.pop(key, None)
+                modify_objects.pop(key, None)
+                continue
+            modify_objects.pop(key, None)
+            delete_objects[key] = edit
+            continue
+
+        if isinstance(edit, AddLinkEdit):
+            key = (edit.link_type, _locator_key(edit.from_locator), _locator_key(edit.to_locator))
+            if key in remove_links:
+                remove_links.pop(key, None)
+                continue
+            add_links[key] = edit
+            continue
+
+        if isinstance(edit, RemoveLinkEdit):
+            key = (edit.link_type, _locator_key(edit.from_locator), _locator_key(edit.to_locator))
+            if key in add_links:
+                add_links.pop(key, None)
+                continue
+            remove_links[key] = edit
+            continue
+
+    normalized: list[OntologyEdit] = []
+    normalized.extend(add_objects.values())
+    normalized.extend(modify_objects.values())
+    normalized.extend(delete_objects.values())
+    normalized.extend(add_links.values())
+    normalized.extend(remove_links.values())
+    return TransactionEdit(edits=normalized, assertions=transaction.assertions)

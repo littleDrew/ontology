@@ -39,6 +39,34 @@ class BubblewrapRunner:
         cmd.extend([self._config.python_executable, str(script_path)])
         return cmd
 
+
+    def run_inline_code(self, implementation_code: str, function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.available():
+            raise RuntimeError("bubblewrap is not available")
+        with tempfile.TemporaryDirectory() as workdir:
+            workdir_path = Path(workdir)
+            module_path = workdir_path / "user_function.py"
+            module_path.write_text(implementation_code, encoding="utf-8")
+            script_path = workdir_path / "sandbox_runner.py"
+            script_path.write_text(
+                _sandbox_script("user_function", function_name),
+                encoding="utf-8",
+            )
+            input_data = json.dumps(payload).encode("utf-8")
+            cmd = self.build_command(script_path)
+            result = subprocess.run(
+                cmd,
+                input=input_data,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=self._config.timeout_s,
+                cwd=str(workdir_path),
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.decode("utf-8"))
+            return json.loads(result.stdout.decode("utf-8"))
+
     def run(self, module_path: str, function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.available():
             raise RuntimeError("bubblewrap is not available")
