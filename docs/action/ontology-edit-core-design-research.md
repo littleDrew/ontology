@@ -116,33 +116,58 @@ Palantir 示例表明：
 
 建议先支持：主对象 + 一跳关联对象。
 
-## 4.2 统一中间模型
+## 4.2 统一中间模型（对齐 Foundry Python SDK）
 
 ```python
 @dataclass(frozen=True)
-class EditOp:
-    op: Literal["addObject", "modifyObject", "deleteObject", "addLink", "removeLink"]
+class AddObjectEdit:
+    type: Literal["addObject"]
     object_type: str
-    primary_key: dict | str | None = None
-    properties: dict | None = None
-    link_type: str | None = None
-    linked_object_primary_key: dict | str | None = None
+    properties: dict[str, object | None]
 
 @dataclass(frozen=True)
-class EditPlan:
-    action_type: str
-    invocation_id: str
-    idempotency_key: str
-    edits: list[EditOp]
+class ModifyObjectEdit:
+    type: Literal["modifyObject"]
+    object_type: str
+    primary_key: dict | str
+    properties: dict[str, object | None]
+
+@dataclass(frozen=True)
+class DeleteObjectEdit:
+    type: Literal["deleteObject"]
+    object_type: str
+    primary_key: dict | str
+
+@dataclass(frozen=True)
+class AddLinkEdit:
+    type: Literal["addLink"]
+    object_type: str
+    primary_key: dict | str
+    link_type: str
+    linked_object_primary_key: dict | str
+
+@dataclass(frozen=True)
+class DeleteLinkEdit:
+    type: Literal["removeLink"]
+    object_type: str
+    primary_key: dict | str
+    link_type: str
+    linked_object_primary_key: dict | str
+
+TransactionEdit = AddObjectEdit | ModifyObjectEdit | DeleteObjectEdit | AddLinkEdit | DeleteLinkEdit
 ```
+
+说明：
+- 这里建议直接采用 `TransactionEdit` 命名（而不是 `EditPlan/EditOp`），与 Foundry SDK 文档和 API 入参对齐。
+- 函数返回值建议为 `list[TransactionEdit]`；`action_type`、`invocation_id`、`idempotency_key` 放在执行上下文中，不耦合到 edit 数据结构里。
 
 ## 4.3 Capture 层实现形态（吸收可取方案）
 
-建议采用 **Unit of Work + Dynamic Proxy**，但保持“Proxy 只做捕获，最终落到显式 EditOp”：
+建议采用 **Unit of Work + Dynamic Proxy**，但保持“Proxy 只做捕获，最终落到显式 TransactionEdit”：
 
 - `OntologyEdits`（UoW 容器）
   - 维护会话内新增/修改/删除/链接变更。
-  - `get_edits()` 统一输出 `EditPlan.edits`。
+  - `get_edits()` 统一输出 `list[TransactionEdit]`。
 - `EditableProxy`
   - 拦截属性赋值，维护 shadow state（同函数内写后读一致）。
   - 将变更记入容器，不直接提交。
@@ -152,7 +177,7 @@ class EditPlan:
 关键约束：
 - Proxy 只用于 `modifyObject` 体验增强；
 - `addObject/deleteObject` 仍通过容器显式命令 API；
-- 最终都归一为 `EditOp`，避免双轨语义。
+- 最终都归一为 `TransactionEdit`，避免双轨语义。
 
 ## 4.4 五类 Edit 的触发点与捕获映射
 
@@ -177,7 +202,7 @@ class EditPlan:
 
 1. 解析 ActionType 与 Function 版本。  
 2. 校验 submission criteria 与权限。  
-3. 执行函数，获得 `EditPlan`。  
+3. 执行函数，获得 `list[TransactionEdit]`。  
 4. 按 `EditableSpec` 校验字段/链接/主键规则。  
 5. 做冲突校验（版本或快照令牌）。  
 6. 单事务 apply（全部成功或回滚）。  
