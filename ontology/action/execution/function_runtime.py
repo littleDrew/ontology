@@ -8,6 +8,7 @@ from ..storage.edits import ObjectInstance
 
 
 class FunctionRuntime:
+    """Higher-level runtime adapter for local or sandbox function execution."""
     def __init__(
         self,
         action_runner: Optional[ActionRunner] = None,
@@ -27,3 +28,11 @@ class FunctionRuntime:
 
     def execute_in_sandbox(self, module_path: str, function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._sandbox_runner.run(module_path, function_name, payload)
+
+    def execute_inline_in_sandbox(
+        self,
+        implementation_code: str,
+        function_name: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return self._sandbox_runner.run_inline_code(implementation_code, function_name, payload)

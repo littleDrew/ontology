@@ -11,7 +11,7 @@ from ontology import (
     ObjectLocator,
 )
 from ontology.action.execution.runtime import function_action
-from ontology.action.storage.graph_store import Neo4jGraphStore
+from ontology.instance.storage.graph_store import Neo4jGraphStore
 
 
 @function_action

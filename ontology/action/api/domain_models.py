@@ -6,11 +6,14 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence
 
 from ..storage.edits import TransactionEdit
+from ..utils import now_utc
 
 
 class ActionStatus(str, Enum):
     queued = "queued"
-    running = "running"
+    validating = "validating"
+    executing = "executing"
+    applying = "applying"
     succeeded = "succeeded"
     failed = "failed"
     reverted = "reverted"
@@ -123,6 +126,6 @@ class SideEffectOutbox:
     status: str = "pending"
     retry_count: int = 0
     max_retries: int = 3
-    next_attempt_at: datetime = field(default_factory=datetime.utcnow)
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    next_attempt_at: datetime = field(default_factory=now_utc)
+    created_at: datetime = field(default_factory=now_utc)
+    updated_at: datetime = field(default_factory=now_utc)

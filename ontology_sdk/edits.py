@@ -17,6 +17,7 @@ from ontology.action.storage.edits import (
 
 
 class EditRecorder:
+    """Record mutation intents before emitting TransactionEdit."""
     def __init__(self) -> None:
         self._edits: List[OntologyEdit] = []
         self._pending_modifications: Dict[ObjectLocator, Dict[str, Any]] = {}
@@ -48,6 +49,7 @@ class EditRecorder:
 
 @dataclass
 class LinkCollection:
+    """Link helper bound to one source object in edit session."""
     link_type: str
     source: "EditableObject"
     recorder: EditRecorder
@@ -60,6 +62,7 @@ class LinkCollection:
 
 
 class EditableObject:
+    """Mutable object wrapper that records property changes."""
     def __init__(
         self,
         object_type: str,
@@ -99,6 +102,7 @@ class EditableObject:
 
 
 class EditObjectType:
+    """Factory accessor for one object type in edit session."""
     def __init__(self, object_type: str, recorder: EditRecorder) -> None:
         self._object_type = object_type
         self._recorder = recorder
@@ -122,6 +126,7 @@ class EditObjectType:
 
 
 class EditObjectsAccessor:
+    """Entry accessor to object-type factories."""
     def __init__(self, recorder: EditRecorder) -> None:
         self._recorder = recorder
 
@@ -130,6 +135,7 @@ class EditObjectsAccessor:
 
 
 class EditSession:
+    """Stateful edit capture session used by OntologyEdits."""
     def __init__(self) -> None:
         self._recorder = EditRecorder()
         self.objects = EditObjectsAccessor(self._recorder)
@@ -139,6 +145,35 @@ class EditSession:
 
 
 def _locator_from_target(target: EditableObject | ObjectInstance) -> ObjectLocator:
+    """Build object locator from editable/object instance target."""
     if isinstance(target, EditableObject):
         return target.locator()
     return target.locator()
+
+
+class OntologyEdits:
+    """SDK capture container for function-side edit intent collection."""
+
+    def __init__(self) -> None:
+        self._recorder = EditRecorder()
+
+    def add_object(self, object_type: str, primary_key: str, properties: Dict[str, Any]) -> None:
+        edit = self._recorder.add_object(object_type, primary_key)
+        edit.properties.update(properties)
+
+    def modify_object(self, locator: ObjectLocator, properties: Dict[str, Any]) -> None:
+        self._recorder.modify_object(locator, properties)
+
+    def delete_object(self, locator: ObjectLocator) -> None:
+        self._recorder.delete_object(locator)
+
+    def add_link(self, link_type: str, from_locator: ObjectLocator, to_locator: ObjectLocator) -> None:
+        self._recorder.add_link(link_type, from_locator, to_locator)
+
+    def remove_link(self, link_type: str, from_locator: ObjectLocator, to_locator: ObjectLocator) -> None:
+        self._recorder.delete_link(link_type, from_locator, to_locator)
+
+    def get_transaction_edit(self) -> TransactionEdit:
+        from ontology.action.storage.edits import normalize_transaction_edit
+
+        return normalize_transaction_edit(self._recorder.flush())

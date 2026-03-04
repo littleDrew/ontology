@@ -12,10 +12,12 @@ from ..storage.edits import (
     ObjectLocator,
     OntologyEdit,
     TransactionEdit,
+    normalize_transaction_edit,
 )
 
 
 class EditBuilder:
+    """Collect and normalize ontology edits during function execution."""
     def __init__(self) -> None:
         self._edits: List[OntologyEdit] = []
         self._pending_modifications: Dict[ObjectLocator, Dict[str, Any]] = {}
@@ -37,10 +39,11 @@ class EditBuilder:
         for locator, properties in self._pending_modifications.items():
             self._edits.append(ModifyObjectEdit(locator=locator, properties=dict(properties)))
         self._pending_modifications.clear()
-        return TransactionEdit(edits=list(self._edits))
+        return normalize_transaction_edit(TransactionEdit(edits=list(self._edits)))
 
 
 class ObjectProxy:
+    """Proxy object that tracks in-function property mutations as edits."""
     def __init__(self, instance: ObjectInstance, builder: EditBuilder) -> None:
         object.__setattr__(self, "_instance", instance)
         object.__setattr__(self, "_builder", builder)
@@ -76,6 +79,7 @@ class ObjectProxy:
 
 @dataclass
 class Context:
+    """Execution context injected into action functions."""
     edit_builder: EditBuilder = field(default_factory=EditBuilder)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -84,11 +88,15 @@ class Context:
 
 
 class ActionRunner:
+    """In-process runner for action functions with edit capture."""
     def __init__(self) -> None:
         self._registry: Dict[str, Callable[..., Any]] = {}
 
     def register(self, name: str, fn: Callable[..., Any]) -> None:
         self._registry[name] = fn
+
+    def resolve(self, name: str) -> Callable[..., Any] | None:
+        return self._registry.get(name)
 
     def execute(
         self,
@@ -112,5 +120,6 @@ class ActionRunner:
 
 
 def function_action(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator marker for action functions."""
     fn._is_action_function = True  # type: ignore[attr-defined]
     return fn
