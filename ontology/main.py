@@ -8,7 +8,7 @@ from .action.api.service import ActionService
 from .instance.storage.graph_store import GraphStore
 from .instance.api.service import InstanceService
 from .action.storage.repository import ActionRepository
-from .search.storage.service import SearchService
+from .search.api.service import SearchService
 
 if TYPE_CHECKING:
     from fastapi import FastAPI

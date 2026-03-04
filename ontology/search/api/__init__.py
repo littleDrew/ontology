@@ -1,1 +1,3 @@
-__all__: list[str] = []
+from .service import SearchService
+
+__all__ = ["SearchService"]
