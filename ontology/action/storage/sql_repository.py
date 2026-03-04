@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
 
-from ..models import (
+from ..api.domain_models import (
     ActionExecution,
     ActionLog,
     ActionRevert,

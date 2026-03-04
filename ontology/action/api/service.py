@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
-from ..models import (
+from .domain_models import (
     ActionDefinition,
     ActionExecution,
     ActionLog,
@@ -19,7 +19,7 @@ from ..models import (
 from ..storage.repository import ActionRepository
 from ..storage.apply import DataFunnelService
 from ..storage.edits import edit_to_dict
-from ..notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
+from ..execution.notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
 from ..execution.runtime import ActionRunner
 
 

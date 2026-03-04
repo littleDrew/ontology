@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Protocol, Tuple
 
-from ..models import (
+from ..api.domain_models import (
     ActionDefinition,
     ActionExecution,
     ActionLog,
