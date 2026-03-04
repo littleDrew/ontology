@@ -1,3 +1,3 @@
-from .storage.service import SearchService
+from .api.service import SearchService
 
-__all__ = ['SearchService']
+__all__ = ["SearchService"]

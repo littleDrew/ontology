@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from ontology.action.api.schemas import ObjectResponse
-from ontology.search.storage.service import SearchService
+from ontology.search.api.service import SearchService
 
 
 def create_router(search_service: SearchService) -> APIRouter:
