@@ -11,6 +11,7 @@ from .edits import EditSession
 
 @dataclass
 class ObjectTypeClient:
+    """Client for one ontology object type endpoint."""
     object_type: str
     store: Optional[GraphStore]
     base_url: Optional[str]
@@ -55,6 +56,7 @@ class ObjectTypeClient:
 
 
 class ObjectsClient:
+    """Objects API grouping accessor."""
     def __init__(
         self,
         store: Optional[GraphStore],
@@ -107,6 +109,7 @@ class ObjectsClient:
 
 
 class OntologyClient:
+    """Root ontology API client wrapper."""
     def __init__(
         self,
         store: Optional[GraphStore],
@@ -123,6 +126,7 @@ class OntologyClient:
 
 
 class FoundryClient:
+    """Top-level SDK client entrypoint."""
     def __init__(
         self,
         store: Optional[GraphStore] = None,

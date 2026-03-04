@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 @dataclass(frozen=True)
 class ObjectLocator:
+    """Stable locator for one ontology object (type + key + optional version)."""
     object_type: str
     primary_key: str
     version: Optional[int] = None
@@ -13,6 +14,7 @@ class ObjectLocator:
 
 @dataclass
 class ObjectInstance:
+    """In-memory object instance snapshot."""
     object_type: str
     primary_key: str
     properties: Dict[str, Any]
@@ -33,6 +35,7 @@ class OntologyEdit:
 
 @dataclass
 class AddObjectEdit(OntologyEdit):
+    """Create a new object."""
     object_type: str
     primary_key: str
     properties: Dict[str, Any]
@@ -40,17 +43,20 @@ class AddObjectEdit(OntologyEdit):
 
 @dataclass
 class DeleteObjectEdit(OntologyEdit):
+    """Delete an existing object."""
     locator: ObjectLocator
 
 
 @dataclass
 class ModifyObjectEdit(OntologyEdit):
+    """Modify properties of an existing object."""
     locator: ObjectLocator
     properties: Dict[str, Any]
 
 
 @dataclass
 class AddLinkEdit(OntologyEdit):
+    """Create a relation between two objects."""
     link_type: str
     from_locator: ObjectLocator
     to_locator: ObjectLocator
@@ -58,6 +64,7 @@ class AddLinkEdit(OntologyEdit):
 
 @dataclass
 class RemoveLinkEdit(OntologyEdit):
+    """Remove a relation between two objects."""
     link_type: str
     from_locator: ObjectLocator
     to_locator: ObjectLocator
@@ -65,6 +72,7 @@ class RemoveLinkEdit(OntologyEdit):
 
 @dataclass
 class DeleteLinkEdit(OntologyEdit):
+    """Compatibility alias for link removal in legacy payloads."""
     link_type: str
     from_locator: ObjectLocator
     to_locator: ObjectLocator
@@ -72,6 +80,7 @@ class DeleteLinkEdit(OntologyEdit):
 
 @dataclass
 class TransactionEdit(OntologyEdit):
+    """Container for a set of ontology edits applied atomically."""
     edits: List[OntologyEdit] = field(default_factory=list)
     assertions: Sequence[str] = field(default_factory=list)
 

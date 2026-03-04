@@ -8,6 +8,7 @@ from ..storage.edits import ObjectInstance
 
 
 class FunctionRuntime:
+    """Higher-level runtime adapter for local or sandbox function execution."""
     def __init__(
         self,
         action_runner: Optional[ActionRunner] = None,

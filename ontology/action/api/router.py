@@ -11,12 +11,13 @@ def create_router(
     action_service: ActionService | None = None,
     repository: ActionRepository | None = None,
 ) -> APIRouter:
-    """Create v1 action router (without legacy compatibility endpoints)."""
+    """Create v1 action routes for apply and execution query."""
 
     router = APIRouter()
 
     @router.post("/actions/{action_id}/apply", response_model=ActionExecutionResponse)
     def apply_action(action_id: str, request: ActionApplyRequest) -> ActionExecutionResponse:
+        """Apply an action definition end-to-end (submit + execute + apply)."""
         if action_service is None or repository is None:
             raise HTTPException(status_code=501, detail="Action service not configured")
         definition = repository.get_action(action_id, request.version)
@@ -43,6 +44,7 @@ def create_router(
 
     @router.get("/actions/executions/{execution_id}", response_model=ActionExecutionResponse)
     def get_action_execution(execution_id: str) -> ActionExecutionResponse:
+        """Fetch one action execution by id."""
         if repository is None:
             raise HTTPException(status_code=501, detail="Action repository not configured")
         execution = repository.get_execution(execution_id)

@@ -36,6 +36,7 @@ from .models import (
 
 
 class SqlActionRepository:
+    """SQLAlchemy repository for action control-plane metadata."""
     def __init__(self, database_url: str) -> None:
         self._engine = create_engine(database_url)
         Base.metadata.create_all(self._engine)

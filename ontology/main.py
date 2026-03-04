@@ -20,7 +20,7 @@ def create_app(
     repository: ActionRepository | None = None,
     include_legacy_routes: bool = True,
 ) -> "FastAPI":
-    """Create the ontology FastAPI application."""
+    """Build FastAPI app with phase-1 routers and shared services."""
 
     from fastapi import FastAPI
 

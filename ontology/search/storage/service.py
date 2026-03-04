@@ -5,6 +5,7 @@ from ontology.instance.api.service import InstanceService
 
 
 class SearchService:
+    """Read service facade for object query endpoints."""
     def __init__(self, instance_service: InstanceService) -> None:
         self._instance_service = instance_service
 

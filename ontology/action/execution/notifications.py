@@ -10,6 +10,7 @@ import hashlib
 
 @dataclass
 class NotificationMessage:
+    """Canonical notification message payload."""
     channel: str
     subject: str
     body: str
@@ -17,6 +18,7 @@ class NotificationMessage:
 
 
 class NotificationDispatcher:
+    """In-memory dispatcher used for notification side effects."""
     def __init__(self) -> None:
         self.sent: List[NotificationMessage] = []
 
@@ -25,6 +27,7 @@ class NotificationDispatcher:
 
 
 class WebhookDispatcher:
+    """HTTP webhook dispatcher used by webhook side effect handler."""
     def __init__(self, timeout_s: float = 3.0, secret: Optional[str] = None) -> None:
         self._timeout_s = timeout_s
         self._secret = secret

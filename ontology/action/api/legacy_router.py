@@ -11,12 +11,13 @@ def create_legacy_router(
     action_service: ActionService | None = None,
     repository: ActionRepository | None = None,
 ) -> APIRouter:
-    """Legacy unversioned action endpoints kept for compatibility."""
+    """Create legacy unversioned compatibility routes."""
 
     router = APIRouter()
 
     @router.post("/actions/submit", response_model=ActionExecutionResponse)
     def submit_action(request: ActionSubmitRequest) -> ActionExecutionResponse:
+        """Legacy action submit endpoint."""
         if action_service is None or repository is None:
             raise HTTPException(status_code=501, detail="Action service not configured")
         definition = repository.get_action(request.action_name, request.version)
@@ -34,6 +35,7 @@ def create_legacy_router(
 
     @router.get("/actions/{execution_id}", response_model=ActionExecutionResponse)
     def get_action_execution(execution_id: str) -> ActionExecutionResponse:
+        """Legacy execution lookup endpoint."""
         if repository is None:
             raise HTTPException(status_code=501, detail="Action repository not configured")
         execution = repository.get_execution(execution_id)

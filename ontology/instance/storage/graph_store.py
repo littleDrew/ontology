@@ -21,6 +21,7 @@ from ontology.action.storage.edits import (
 
 
 class GraphStore:
+    """Storage abstraction for ontology object/link read-write operations."""
     def apply_edit(self, edit: OntologyEdit, action_id: str | None = None) -> None:
         raise NotImplementedError
 
@@ -36,6 +37,7 @@ class GraphStore:
 
 @dataclass
 class InMemoryGraphStore(GraphStore):
+    """In-memory GraphStore implementation for tests and local runs."""
     objects: Dict[Tuple[str, str], ObjectInstance]
     links: Set[Tuple[str, Tuple[str, str], Tuple[str, str]]]
 
@@ -177,6 +179,7 @@ class InMemoryGraphStore(GraphStore):
 
 
 class Neo4jGraphStore(GraphStore):
+    """Neo4j-backed GraphStore implementation for production-like environments."""
     def __init__(self, uri: str, user: str, password: str) -> None:
         neo4j_module = importlib.import_module("neo4j")
         self._driver = neo4j_module.GraphDatabase.driver(uri, auth=(user, password))
@@ -360,6 +363,7 @@ class Neo4jGraphStore(GraphStore):
 
 
 def _extract_locators(edit: OntologyEdit) -> list[ObjectLocator]:
+    """Collect object locators referenced by an edit recursively."""
     if isinstance(edit, TransactionEdit):
         locators: list[ObjectLocator] = []
         for nested in edit.edits:

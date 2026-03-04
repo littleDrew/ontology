@@ -7,6 +7,7 @@ from ontology.search.storage.service import SearchService
 
 
 def create_router(search_service: SearchService) -> APIRouter:
+    """Create search routes under /objects namespace."""
     router = APIRouter()
 
     @router.get('/objects/{object_type}/{primary_key}', response_model=ObjectResponse)

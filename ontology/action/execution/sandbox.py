@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class BubblewrapConfig:
+    """Configuration for bubblewrap sandbox execution constraints."""
     python_executable: str = sys.executable
     network_enabled: bool = False
     read_only_root: bool = True
@@ -19,6 +20,7 @@ class BubblewrapConfig:
 
 
 class BubblewrapRunner:
+    """Execute function modules/code in bubblewrap-isolated subprocesses."""
     def __init__(self, config: Optional[BubblewrapConfig] = None) -> None:
         self._config = config or BubblewrapConfig()
 
