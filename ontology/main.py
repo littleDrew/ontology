@@ -24,12 +24,20 @@ def create_app(
     """Build FastAPI app with phase-1 routers and shared services."""
 
     from fastapi import FastAPI
+    from fastapi.responses import RedirectResponse
 
     from .action.api.legacy_router import create_legacy_router
     from .action.api.router import create_router as create_action_router
     from .search.api.router import create_router as create_search_router
 
     app = FastAPI(title="Ontology API")
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        """Redirect root path to interactive API docs."""
+
+        return RedirectResponse(url="/docs", status_code=307)
+
     instance_service = InstanceService(store)
     search_service = SearchService(instance_service)
 

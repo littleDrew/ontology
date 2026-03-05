@@ -92,3 +92,12 @@ def test_search_routes_under_v1() -> None:
     response = client.get('/api/v1/objects/Loan/loan-1')
     assert response.status_code == 200
     assert response.json()['primary_key'] == 'loan-1'
+
+
+def test_root_redirects_to_docs() -> None:
+    app, _ = _build_app()
+    client = TestClient(app)
+
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/docs"

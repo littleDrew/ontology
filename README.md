@@ -100,9 +100,10 @@ http://localhost:8765/redoc
 http://localhost:8765/openapi.json
 ```
 
+> 说明：`/` 根路径默认会重定向到 `/docs`。如果看到 `404 Not Found`，请确认使用的是最新代码并优先访问上面的 `/docs` 或 `/api/v1/*` 接口路径。
+
 ## 测试
 
 ```bash
 pytest -q
 ```
-

@@ -462,6 +462,102 @@ ontology/
 - 当前 `GET /actions/{execution_id}` -> 迁移为 `GET /api/v1/actions/executions/{execution_id}`。
 - 在 `ontology/main.py` 中 `include_router(..., prefix="/api/v1")` 统一挂载。
 
+### 11.2 `apply` 幂等设计（`Idempotency-Key` / `client_request_id`）
+
+> 目标：把“同一业务请求的重试”变为“同一执行结果的复用”，避免网络抖动、用户重复点击、网关重试导致重复执行。
+
+#### 11.2.1 设计原则
+
+1. **同键同语义**：同一个幂等键必须绑定同一个请求语义（`action_id + version + submitter + input_payload + input_instances`）。
+2. **先登记后执行**：在真正执行函数前先占位幂等记录，防止并发双写。
+3. **状态可观测**：调用方能区分“首次执行 / 命中历史结果 / 正在执行中”。
+4. **失败可重试**：对明确可重试失败可允许重新执行；对已成功执行必须严格复用结果。
+
+#### 11.2.2 适用入口与键来源
+
+- 仅对 `POST /api/v1/actions/{action_id}/apply` 生效。
+- 客户端可二选一提供键：
+  - `Idempotency-Key`（HTTP Header，优先级更高）；
+  - `client_request_id`（请求体字段）。
+- 两者都提供时：以 `Idempotency-Key` 为准，并在日志中记录冲突告警字段。
+
+#### 11.2.3 控制面数据模型（建议）
+
+新增表：`action_idempotency_records`
+
+- `idempotency_key`（字符串，业务可读键）
+- `action_name`
+- `submitter`
+- `request_hash`（规范化请求体哈希）
+- `execution_id`（关联 `action_executions.id`）
+- `status`（`in_progress | succeeded | failed_retryable | failed_non_retryable`）
+- `response_payload`（可选，缓存响应）
+- `created_at / updated_at / expires_at`
+
+索引与约束：
+
+- 唯一键：`UNIQUE(action_name, submitter, idempotency_key)`
+- 查询索引：`(status, updated_at)` 便于清理与巡检
+
+#### 11.2.4 `apply` 时序（伪流程）
+
+1. 解析并校验幂等键（长度、字符集、TTL）。
+2. 计算 `request_hash`（请求规范化后哈希）。
+3. `INSERT ... ON CONFLICT` 抢占幂等记录：
+   - 插入成功：说明首个请求，状态置 `in_progress`，继续执行。
+   - 冲突命中：读取已有记录并执行分支：
+     - `succeeded`：直接返回历史执行结果（HTTP 200，`idempotency_hit=true`）。
+     - `in_progress`：返回“处理中”（建议 HTTP 409/425 + 可轮询 execution_id）。
+     - `failed_retryable`：允许重试抢占（CAS 更新后重跑）。
+     - `failed_non_retryable`：直接返回历史失败。
+4. 对命中记录校验 `request_hash`：
+   - 不一致则返回 `409 E_IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD`。
+5. 执行当前主流程（submit -> execute -> apply）。
+6. 按执行终态回写幂等记录：
+   - 成功：`succeeded`
+   - 可重试失败：`failed_retryable`
+   - 不可重试失败：`failed_non_retryable`
+
+#### 11.2.5 请求哈希规范（避免“同键异义”）
+
+`request_hash` 必须基于规范化 JSON：
+
+- 字段排序稳定；
+- 忽略非语义字段（如 trace 字段）；
+- 保留 `action_id/version/submitter/input_payload/input_instances`；
+- 建议算法：`SHA-256(canonical_json)`。
+
+#### 11.2.6 失败语义与错误码
+
+新增错误码：
+
+- `E_IDEMPOTENCY_KEY_REQUIRED`：该 Action 要求幂等但未提供键。
+- `E_IDEMPOTENCY_KEY_INVALID`：键格式非法。
+- `E_IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD`：同键不同请求体。
+- `E_IDEMPOTENCY_IN_PROGRESS`：已有同键请求正在执行。
+
+与既有失败码并存，最终统一进入 ActionLog 的 `error_code` 维度。
+
+#### 11.2.7 与阶段一边界的关系
+
+- 幂等是**阶段一主链路稳定性能力**，不依赖 Outbox/Saga；
+- 可在不启用阶段二能力的前提下独立上线；
+- 与修复任务（repair job）兼容：repair 仅修复执行状态，不覆盖成功幂等记录。
+
+#### 11.2.8 最小实现范围（建议按 PR 拆分）
+
+- **PR-1（最小可用）**：
+  - Header/body 取键；
+  - `UNIQUE(action_name, submitter, idempotency_key)`；
+  - 命中成功直接返回历史 execution；
+  - 同键异义 409 拒绝。
+- **PR-2（并发完善）**：
+  - `in_progress` 状态与超时恢复；
+  - retryable/non-retryable 分流。
+- **PR-3（运维完善）**：
+  - TTL 清理任务；
+  - 命中率、冲突率、重复提交率指标。
+
 ---
 
 ## 12. 测试与验收方案（阶段一 Gate）
