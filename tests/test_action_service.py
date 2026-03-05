@@ -386,6 +386,62 @@ def test_action_service_apply_uses_sandbox_mode_result_protocol() -> None:
     assert updated.properties["status"] == "APPROVED"
 
 
+def test_action_service_sandbox_resolves_function_version_independently() -> None:
+    class StubFunctionRuntime:
+        def execute_in_sandbox(self, implementation_code, function_name, input_instances, params=None, metadata=None):
+            assert implementation_code == "def update_status_v2(loan, context, status):\n    loan.status = status\n    return 'ok-v2'"
+            return {
+                "result": "ok-v2",
+                "edits": TransactionEdit(
+                    edits=[
+                        ModifyObjectEdit(
+                            locator=ObjectLocator("Loan", "loan-sbx-v2"),
+                            properties={"status": "APPROVED"},
+                        )
+                    ]
+                ),
+            }
+
+    store = InMemoryGraphStore()
+    store.add_object("Loan", "loan-sbx-v2", {"status": "PENDING"})
+    repo = InMemoryActionRepository()
+    service = ActionService(
+        repo,
+        ActionRunner(),
+        DataFunnelService(store),
+        function_runtime=StubFunctionRuntime(),
+    )
+
+    # Register only function version 2 while action version is 1.
+    repo.add_function(
+        FunctionDefinition(
+            name="update_status",
+            runtime="python",
+            code_ref="def update_status_v2(loan, context, status):\n    loan.status = status\n    return 'ok-v2'",
+            version=2,
+        )
+    )
+    repo.add_action(
+        ActionDefinition(
+            name="SandboxActionV2",
+            description="Sandbox action v2",
+            function_name="update_status",
+            execution_mode=ActionExecutionMode.sandbox,
+            version=1,
+        )
+    )
+
+    execution = service.apply(
+        action_name="SandboxActionV2",
+        submitter="user-sbx",
+        input_payload={"status": "APPROVED"},
+        version=1,
+        input_instance_locators={"loan": {"object_type": "Loan", "primary_key": "loan-sbx-v2"}},
+    )
+
+    assert execution.status.value == "succeeded"
+
+
 def test_action_service_validates_entity_target_type() -> None:
     store = InMemoryGraphStore()
     store.add_object("Loan", "loan-t1", {"status": "PENDING"})

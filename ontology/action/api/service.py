@@ -186,7 +186,9 @@ class ActionService:
         resolved_instances = self._resolve_input_instances(input_instance_locators or {})
         self._validate_target_constraints(definition, resolved_instances)
         if definition.execution_mode == ActionExecutionMode.sandbox:
-            function_definition = self._repository.get_function(definition.function_name, version=version)
+            # Function versioning is independent from Action definition versioning.
+            # Resolve latest (or repository default policy) by function name.
+            function_definition = self._repository.get_function(definition.function_name)
             if function_definition is None:
                 raise ValueError(f"Function definition '{definition.function_name}' is not found")
             return self.execute_in_sandox(
@@ -267,10 +269,14 @@ class ActionService:
         from_locator = self._parse_endpoint_locator(alias, "from", from_endpoint)
         to_locator = self._parse_endpoint_locator(alias, "to", to_endpoint)
 
-        if self._apply_engine.get_object(from_locator) is None:
-            raise ValueError(f"Input relation from-endpoint not found for '{alias}'")
-        if self._apply_engine.get_object(to_locator) is None:
-            raise ValueError(f"Input relation to-endpoint not found for '{alias}'")
+        try:
+            self._apply_engine.get_object(from_locator)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Input relation from-endpoint not found for '{alias}'") from exc
+        try:
+            self._apply_engine.get_object(to_locator)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Input relation to-endpoint not found for '{alias}'") from exc
 
         return RelationInstance(link_type=link_type, from_locator=from_locator, to_locator=to_locator)
 
