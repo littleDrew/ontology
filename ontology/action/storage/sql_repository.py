@@ -11,11 +11,13 @@ from ..utils import now_utc
 
 from ..api.domain_models import (
     ActionExecution,
+    ActionExecutionMode,
     ActionLog,
     ActionRevert,
     ActionState,
     ActionStateStatus,
     ActionDefinition,
+    ActionTargetType,
     FunctionDefinition,
     ActionStatus,
     NotificationLog,
@@ -89,6 +91,9 @@ class SqlActionRepository:
                     version=definition.version,
                     description=definition.description,
                     function_name=definition.function_name,
+                    execution_mode=definition.execution_mode.value,
+                    target_type=definition.target_type.value if definition.target_type else None,
+                    target_api_name=definition.target_api_name,
                     input_schema=definition.input_schema,
                     output_schema=definition.output_schema,
                     active=1 if definition.active else 0,
@@ -127,10 +132,15 @@ class SqlActionRepository:
             row = session.execute(stmt).scalars().first()
         if row is None:
             return None
+        execution_mode = row.execution_mode or ActionExecutionMode.in_process.value
+        target_type = ActionTargetType(row.target_type) if row.target_type else None
         return ActionDefinition(
             name=row.name,
             description=row.description,
             function_name=row.function_name,
+            execution_mode=ActionExecutionMode(execution_mode),
+            target_type=target_type,
+            target_api_name=row.target_api_name,
             input_schema=row.input_schema,
             output_schema=row.output_schema,
             version=row.version,

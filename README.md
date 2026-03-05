@@ -68,6 +68,12 @@ pip install fastapi uvicorn sqlalchemy pytest httpx
 pip install neo4j
 ```
 
+如需 MySQL 持久化存储测试：
+
+```bash
+pip install pymysql
+```
+
 ### 2) 运行一个最小 API（内存存储）
 
 ```bash
@@ -107,3 +113,42 @@ http://localhost:8765/openapi.json
 ```bash
 pytest -q
 ```
+
+### MySQL 持久化存储测试说明
+
+仓库中的 `SqlActionRepository` 基于 SQLAlchemy，可通过 `MYSQL_TEST_URL` 对接 MySQL 执行 smoke 测试。
+
+1) 安装 MySQL（Ubuntu）：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y mysql-server
+```
+
+2) 创建测试库（示例）：
+
+```bash
+mysql -uroot -e "CREATE DATABASE IF NOT EXISTS ontology_test;"
+```
+
+3) 配置连接串并执行用例：
+
+```bash
+export MYSQL_TEST_URL='mysql+pymysql://root@127.0.0.1:3306/ontology_test'
+pytest -q tests/test_sql_repository_mysql.py
+```
+
+> 未设置 `MYSQL_TEST_URL` 时，该用例会自动 `skip`。
+
+### Neo4j 集成测试说明
+
+`tests/test_action_flow.py::test_action_function_applies_edits_to_neo4j` 依赖外部 Neo4j 实例。  
+若未设置以下环境变量，测试会自动 `skip`：
+
+```bash
+export NEO4J_URI=bolt://127.0.0.1:7687
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=your-password
+```
+
+另外需安装 Neo4j Python 驱动（`pip install neo4j`）。

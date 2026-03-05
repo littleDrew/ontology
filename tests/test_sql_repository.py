@@ -7,6 +7,8 @@ from datetime import datetime
 from ontology import (
     ActionDefinition,
     ActionExecution,
+    ActionExecutionMode,
+    ActionTargetType,
     ActionLog,
     ActionRevert,
     ActionState,
@@ -104,6 +106,9 @@ def test_sql_repository_persists_records(tmp_path) -> None:
             name="Action",
             description="Test",
             function_name="Fn",
+            execution_mode=ActionExecutionMode.sandbox,
+            target_type=ActionTargetType.entity,
+            target_api_name="Loan",
             input_schema={"x": "int"},
             output_schema={"y": "int"},
             version=1,
@@ -112,5 +117,9 @@ def test_sql_repository_persists_records(tmp_path) -> None:
 
     pending = repo.claim_pending_outbox()
     assert pending[0].outbox_id == "out-1"
-    assert repo.get_action("Action", version=1) is not None
+    action = repo.get_action("Action", version=1)
+    assert action is not None
+    assert action.execution_mode == ActionExecutionMode.sandbox
+    assert action.target_type == ActionTargetType.entity
+    assert action.target_api_name == "Loan"
     assert repo.get_function("Fn", version=1) is not None

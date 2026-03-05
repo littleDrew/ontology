@@ -29,6 +29,14 @@ class ObjectInstance:
 
 
 @dataclass
+class RelationInstance:
+    """In-memory relation instance snapshot by link type and endpoints."""
+    link_type: str
+    from_locator: ObjectLocator
+    to_locator: ObjectLocator
+
+
+@dataclass
 class OntologyEdit:
     """Base class for edits."""
 

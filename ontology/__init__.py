@@ -3,6 +3,8 @@
 from .action.api.domain_models import (
     ActionDefinition,
     ActionExecution,
+    ActionExecutionMode,
+    ActionTargetType,
     ActionLog,
     ActionRevert,
     ActionState,
@@ -62,6 +64,8 @@ __all__ = [
     "InstanceService",
     "ActionDefinition",
     "ActionExecution",
+    "ActionExecutionMode",
+    "ActionTargetType",
     "ActionLog",
     "ActionRevert",
     "ActionState",

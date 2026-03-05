@@ -178,6 +178,15 @@ ontology/
 - 仅 `ACTIVE` Action 可执行。
 - `function_ref` 固定到函数“已发布具体版本”（`function_id + version`，阶段一不做版本范围解析）。
 
+阶段一补充约束（面向目标类型治理）：
+- `target_type`（可选）：`entity | relation`。
+- `target_api_name`（可选）：目标类型对应的 API 名称（例如实体 `User`，关系 `MEMBER_OF`）。
+- 若配置了 `target_type/target_api_name`，则在输入实例解析后进行强校验，不匹配直接失败（进入 `FAILED@validating`）。
+
+设计意图：
+- 保留 Action 在治理面上的“目标范围”语义，避免函数内任意 `search` 导致隐式批量改写。
+- 与权限/提交条件配合，保证“谁可对什么类型执行动作”可审计。
+
 
 版本策略建议：
 - `ActionDefinition`：**就地修改（in-place）** 为主，保持 `name` 稳定；阶段一避免复杂多版本并存。
@@ -222,6 +231,33 @@ ontology/
    - 实现简单，去掉 artifact 仓库依赖，便于快速商用落地。
    - 与 SQLite/MySQL 兼容性好，迁移成本低。
    - 后续若要升级为 `artifact_uri` 模式，可平滑加字段并做双读迁移。
+
+### 4.2.2 输入协议补充（实体实例 + 关系实例）
+
+阶段一允许两类输入实例：
+
+1) **实体输入**（兼容现有协议）
+```json
+{
+  "loan": {"object_type": "Loan", "primary_key": "loan-1", "version": 1}
+}
+```
+
+2) **关系输入**（新增）
+```json
+{
+  "membership": {
+    "link_type": "MEMBER_OF",
+    "from": {"object_type": "User", "primary_key": "u1"},
+    "to": {"object_type": "Group", "primary_key": "g1"}
+  }
+}
+```
+
+关系输入在验证期需要满足：
+- `link_type`、`from`、`to` 字段完整；
+- `from/to` 端点对象存在；
+- 若 Action 配置了 `target_type=relation`，则 `link_type` 需匹配 `target_api_name`。
 
 ## 4.3 ActionExecution（阶段一最小必要模型）
 
