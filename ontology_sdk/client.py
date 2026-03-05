@@ -9,6 +9,15 @@ from ontology.instance.storage.graph_store import GraphStore
 from .edits import EditSession
 
 
+def _request_with_objects_prefix(http_client: Any, base_url: str, suffix: str, params: Optional[dict[str, Any]] = None):
+    """Call objects endpoint with v1-first fallback for compatibility."""
+
+    response = http_client.get(f"{base_url}/api/v1/objects/{suffix}", params=params)
+    if response.status_code == 404:
+        response = http_client.get(f"{base_url}/objects/{suffix}", params=params)
+    return response
+
+
 @dataclass
 class ObjectTypeClient:
     """Client for one ontology object type endpoint."""
@@ -22,7 +31,7 @@ class ObjectTypeClient:
         if self.store is not None:
             return self.store.get_object(locator)
         if self.base_url and self.http_client:
-            response = self.http_client.get(f"{self.base_url}/objects/{self.object_type}/{primary_key}")
+            response = _request_with_objects_prefix(self.http_client, self.base_url, f"{self.object_type}/{primary_key}")
             response.raise_for_status()
             data = response.json()
             return ObjectInstance(
@@ -37,8 +46,10 @@ class ObjectTypeClient:
         if self.store is not None:
             return self.store.list_objects(self.object_type, limit=limit, offset=offset)
         if self.base_url and self.http_client:
-            response = self.http_client.get(
-                f"{self.base_url}/objects/{self.object_type}",
+            response = _request_with_objects_prefix(
+                self.http_client,
+                self.base_url,
+                self.object_type,
                 params={"limit": limit, "offset": offset},
             )
             response.raise_for_status()
@@ -72,7 +83,7 @@ class ObjectsClient:
         if self._store is not None:
             return self._store.get_object(locator)
         if self._base_url and self._http_client:
-            response = self._http_client.get(f"{self._base_url}/objects/{object_type}/{primary_key}")
+            response = _request_with_objects_prefix(self._http_client, self._base_url, f"{object_type}/{primary_key}")
             response.raise_for_status()
             data = response.json()
             return ObjectInstance(
@@ -87,8 +98,10 @@ class ObjectsClient:
         if self._store is not None:
             return self._store.list_objects(object_type, limit=limit, offset=offset)
         if self._base_url and self._http_client:
-            response = self._http_client.get(
-                f"{self._base_url}/objects/{object_type}",
+            response = _request_with_objects_prefix(
+                self._http_client,
+                self._base_url,
+                object_type,
                 params={"limit": limit, "offset": offset},
             )
             response.raise_for_status()

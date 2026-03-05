@@ -6,7 +6,7 @@
 - 通过统一的数据漏斗（Data Funnel）校验并落库；
 - 提供查询接口与执行审计能力。
 
-## doc
+## Doc
 Detail docs in zread
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat-square&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/littleDrew/ontology)
 
@@ -71,21 +71,33 @@ pip install neo4j
 ### 2) 运行一个最小 API（内存存储）
 
 ```bash
-python - <<'PY'
-from ontology import InMemoryGraphStore
-from ontology.main import create_app
-import uvicorn
+python -m ontology.main
+```
 
-app = create_app(store=InMemoryGraphStore())
-uvicorn.run(app, host="0.0.0.0", port=8000)
-PY
+可选参数：
+
+```bash
+python -m ontology.main --host 127.0.0.1 --port 9000 --no-legacy-routes
 ```
 
 ### 3) 访问查询接口
 
 ```bash
-curl http://localhost:8000/api/v1/objects/Employee/emp-1
-curl "http://localhost:8000/api/v1/objects/Employee?limit=20&offset=0"
+curl http://localhost:8765/api/v1/objects/Employee/emp-1
+curl "http://localhost:8765/api/v1/objects/Employee?limit=20&offset=0"
+```
+
+启动后可查看自动生成的 API 文档：
+
+```bash
+# Swagger UI
+http://localhost:8765/docs
+
+# ReDoc
+http://localhost:8765/redoc
+
+# OpenAPI JSON
+http://localhost:8765/openapi.json
 ```
 
 ## 测试
@@ -94,4 +106,3 @@ curl "http://localhost:8000/api/v1/objects/Employee?limit=20&offset=0"
 pytest -q
 ```
 
-如果你愿意，我下一步可以继续补一版“架构导览文档”（包含请求链路图：`router -> service -> runner/funnel -> store/repository`），让新同学 10 分钟内能快速上手。
