@@ -107,10 +107,12 @@ class ActionRunner:
     ) -> Dict[str, Any]:
         params = params or {}
         context = Context(metadata=metadata or {})
-        proxies = {
-            name: ObjectProxy(instance=instance, builder=context.edit_builder)
-            for name, instance in input_instances.items()
-        }
+        proxies = {}
+        for name, instance in input_instances.items():
+            if isinstance(instance, ObjectInstance):
+                proxies[name] = ObjectProxy(instance=instance, builder=context.edit_builder)
+            else:
+                proxies[name] = instance
         result = fn(**proxies, **params, context=context)
         transaction = context.edit_builder.flush()
         return {

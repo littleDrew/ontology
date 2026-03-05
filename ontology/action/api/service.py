@@ -14,6 +14,9 @@ from typing import Any, Callable, Dict, List, Optional
 from .domain_models import (
     ActionDefinition,
     ActionExecution,
+    ActionExecutionMode,
+    ActionTargetType,
+    FunctionDefinition,
     ActionLog,
     ActionRevert,
     ActionState,
@@ -24,9 +27,10 @@ from .domain_models import (
 )
 from ..storage.repository import ActionRepository
 from ontology.instance.api.service import InstanceService
-from ..storage.edits import ObjectLocator, edit_to_dict
+from ..storage.edits import ObjectLocator, RelationInstance, edit_to_dict
 from ..execution.notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
 from ..execution.runtime import ActionRunner
+from ..execution.function_runtime import FunctionRuntime
 from ..config import ActionFeatureFlags
 from ..utils import now_utc
 
@@ -128,10 +132,12 @@ class ActionService:
         repository: ActionRepository,
         runner: ActionRunner,
         apply_engine: InstanceService,
+        function_runtime: FunctionRuntime | None = None,
         feature_flags: ActionFeatureFlags | None = None,
     ) -> None:
         self._repository = repository
         self._runner = runner
+        self._function_runtime = function_runtime or FunctionRuntime(action_runner=runner)
         self._apply_engine = apply_engine
         self._feature_flags = feature_flags or ActionFeatureFlags()
 
@@ -176,17 +182,53 @@ class ActionService:
         if definition is None:
             raise ValueError("Action definition not found")
 
+        execution = self.submit(definition=definition, submitter=submitter, input_payload=input_payload)
+        resolved_instances = self._resolve_input_instances(input_instance_locators or {})
+        self._validate_target_constraints(definition, resolved_instances)
+        if definition.execution_mode == ActionExecutionMode.sandbox:
+            # Function versioning is independent from Action definition versioning.
+            # Resolve latest (or repository default policy) by function name.
+            function_definition = self._repository.get_function(definition.function_name)
+            if function_definition is None:
+                raise ValueError(f"Function definition '{definition.function_name}' is not found")
+            return self.execute_in_sandbox(
+                execution=execution,
+                definition=definition,
+                function_definition=function_definition,
+                input_instances=resolved_instances,
+            )
+
         function = self._runner.resolve(definition.function_name)
         if function is None:
             raise ValueError(f"Function '{definition.function_name}' is not registered")
-
-        execution = self.submit(definition=definition, submitter=submitter, input_payload=input_payload)
-        resolved_instances = self._resolve_input_instances(input_instance_locators or {})
         return self.execute(
             execution=execution,
             definition=definition,
             function=function,
             input_instances=resolved_instances,
+        )
+
+    def execute_in_sandbox(
+        self,
+        execution: ActionExecution,
+        definition: ActionDefinition,
+        function_definition: FunctionDefinition,
+        input_instances: Dict[str, Any],
+        side_effects: Optional[List[SideEffect]] = None,
+    ) -> ActionExecution:
+        if function_definition.runtime != "python":
+            raise ValueError(f"Unsupported sandbox runtime: {function_definition.runtime}")
+        return self._execute_with_result(
+            execution=execution,
+            definition=definition,
+            result_factory=lambda: self._function_runtime.execute_in_sandbox(
+                implementation_code=function_definition.code_ref,
+                function_name=function_definition.name,
+                input_instances=input_instances,
+                params=execution.input_payload,
+            ),
+            input_instances=input_instances,
+            side_effects=side_effects,
         )
 
     def _resolve_input_instances(
@@ -199,6 +241,10 @@ class ActionService:
         """
         resolved: Dict[str, Any] = {}
         for alias, locator in input_instance_locators.items():
+            if "link_type" in locator:
+                relation_instance = self._resolve_relation_instance(alias, locator)
+                resolved[alias] = relation_instance
+                continue
             object_type = locator.get("object_type")
             primary_key = locator.get("primary_key")
             if not object_type or not primary_key:
@@ -211,6 +257,73 @@ class ActionService:
             resolved[alias] = instance
         return resolved
 
+    def _resolve_relation_instance(self, alias: str, locator: Dict[str, Any]) -> RelationInstance:
+        link_type = locator.get("link_type")
+        from_endpoint = locator.get("from")
+        to_endpoint = locator.get("to")
+        if not link_type or not isinstance(from_endpoint, dict) or not isinstance(to_endpoint, dict):
+            raise ValueError(
+                f"Invalid relation input locator for '{alias}', expected {{link_type, from, to}}"
+            )
+
+        from_locator = self._parse_endpoint_locator(alias, "from", from_endpoint)
+        to_locator = self._parse_endpoint_locator(alias, "to", to_endpoint)
+
+        try:
+            self._apply_engine.get_object(from_locator)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Input relation from-endpoint not found for '{alias}'") from exc
+        try:
+            self._apply_engine.get_object(to_locator)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Input relation to-endpoint not found for '{alias}'") from exc
+
+        return RelationInstance(link_type=link_type, from_locator=from_locator, to_locator=to_locator)
+
+    @staticmethod
+    def _parse_endpoint_locator(alias: str, endpoint_name: str, endpoint: Dict[str, Any]) -> ObjectLocator:
+        object_type = endpoint.get("object_type")
+        primary_key = endpoint.get("primary_key")
+        if not object_type or not primary_key:
+            raise ValueError(
+                f"Invalid relation endpoint '{endpoint_name}' for '{alias}', expected object_type/primary_key"
+            )
+        return ObjectLocator(
+            object_type=object_type,
+            primary_key=primary_key,
+            version=endpoint.get("version"),
+        )
+
+    @staticmethod
+    def _validate_target_constraints(
+        definition: ActionDefinition,
+        resolved_instances: Dict[str, Any],
+    ) -> None:
+        if definition.target_type is None:
+            return
+        if definition.target_type == ActionTargetType.entity:
+            for alias, instance in resolved_instances.items():
+                if isinstance(instance, RelationInstance):
+                    raise ValueError(
+                        f"Input '{alias}' is relation but action expects entity target_type"
+                    )
+                if definition.target_api_name and instance.object_type != definition.target_api_name:
+                    raise ValueError(
+                        f"Input '{alias}' object_type '{instance.object_type}' does not match target_api_name '{definition.target_api_name}'"
+                    )
+            return
+
+        if definition.target_type == ActionTargetType.relation:
+            for alias, instance in resolved_instances.items():
+                if not isinstance(instance, RelationInstance):
+                    raise ValueError(
+                        f"Input '{alias}' is entity but action expects relation target_type"
+                    )
+                if definition.target_api_name and instance.link_type != definition.target_api_name:
+                    raise ValueError(
+                        f"Input '{alias}' link_type '{instance.link_type}' does not match target_api_name '{definition.target_api_name}'"
+                    )
+
     def execute(
         self,
         execution: ActionExecution,
@@ -220,6 +333,22 @@ class ActionService:
         side_effects: Optional[List[SideEffect]] = None,
     ) -> ActionExecution:
         """Execute one action attempt end-to-end and persist lifecycle logs."""
+        return self._execute_with_result(
+            execution=execution,
+            definition=definition,
+            result_factory=lambda: self._runner.execute(function, input_instances, params=execution.input_payload),
+            input_instances=input_instances,
+            side_effects=side_effects,
+        )
+
+    def _execute_with_result(
+        self,
+        execution: ActionExecution,
+        definition: ActionDefinition,
+        result_factory: Callable[[], Dict[str, Any]],
+        input_instances: Dict[str, Any],
+        side_effects: Optional[List[SideEffect]] = None,
+    ) -> ActionExecution:
         execution.status = ActionStatus.validating
         execution.started_at = now_utc()
         self._repository.update_execution(execution)
@@ -247,7 +376,7 @@ class ActionService:
                     created_at=now_utc(),
                 )
             )
-            result = self._runner.execute(function, input_instances, params=execution.input_payload)
+            result = result_factory()
             self._repository.add_log(
                 ActionLog(
                     execution_id=execution.execution_id,

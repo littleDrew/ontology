@@ -1,3 +1,5 @@
+import pytest
+
 from ontology.action.utils import now_utc
 
 from ontology import (
@@ -6,6 +8,8 @@ from ontology import (
     ActionReconciler,
     ActionService,
     ActionFeatureFlags,
+    ActionExecutionMode,
+    ActionTargetType,
     ActionState,
     ActionStateStatus,
     DataFunnelService,
@@ -17,13 +21,14 @@ from ontology import (
     SideEffectOutbox,
     SideEffectRegistry,
     SideEffectWorker,
+    FunctionDefinition,
     NotificationDispatcher,
     NotificationEffectHandler,
     WebhookDispatcher,
     WebhookEffectHandler,
 )
 from ontology.action.execution.runtime import function_action
-from ontology.action.storage.edits import ModifyObjectEdit, ObjectLocator, TransactionEdit, edit_to_dict
+from ontology.action.storage.edits import ModifyObjectEdit, ObjectLocator, RelationInstance, TransactionEdit, edit_to_dict
 
 
 @function_action
@@ -321,3 +326,189 @@ def test_phase2_features_disabled_by_default() -> None:
     )
 
     assert repo.outbox == {}
+
+
+def test_action_service_apply_uses_sandbox_mode_result_protocol() -> None:
+    class StubFunctionRuntime:
+        def execute_in_sandbox(self, implementation_code, function_name, input_instances, params=None, metadata=None):
+            assert implementation_code == "def update_status(loan, context, status):\n    loan.status = status\n    return 'ok'"
+            assert function_name == "update_status"
+            return {
+                "result": "ok",
+                "edits": TransactionEdit(
+                    edits=[
+                        ModifyObjectEdit(
+                            locator=ObjectLocator("Loan", "loan-sbx"),
+                            properties={"status": "APPROVED"},
+                        )
+                    ]
+                ),
+            }
+
+    store = InMemoryGraphStore()
+    store.add_object("Loan", "loan-sbx", {"status": "PENDING"})
+    repo = InMemoryActionRepository()
+    runner = ActionRunner()
+    service = ActionService(
+        repo,
+        runner,
+        DataFunnelService(store),
+        function_runtime=StubFunctionRuntime(),
+    )
+
+    repo.add_function(
+        FunctionDefinition(
+            name="update_status",
+            runtime="python",
+            code_ref="def update_status(loan, context, status):\n    loan.status = status\n    return 'ok'",
+            version=1,
+        )
+    )
+    definition = ActionDefinition(
+        name="SandboxAction",
+        description="Sandbox action",
+        function_name="update_status",
+        execution_mode=ActionExecutionMode.sandbox,
+        version=1,
+    )
+    repo.add_action(definition)
+
+    execution = service.apply(
+        action_name="SandboxAction",
+        submitter="user-sbx",
+        input_payload={"status": "APPROVED"},
+        version=1,
+        input_instance_locators={"loan": {"object_type": "Loan", "primary_key": "loan-sbx"}},
+    )
+
+    assert execution.status.value == "succeeded"
+    updated = store.get_object(ObjectLocator("Loan", "loan-sbx"))
+    assert updated.properties["status"] == "APPROVED"
+
+
+def test_action_service_sandbox_resolves_function_version_independently() -> None:
+    class StubFunctionRuntime:
+        def execute_in_sandbox(self, implementation_code, function_name, input_instances, params=None, metadata=None):
+            assert implementation_code == "def update_status_v2(loan, context, status):\n    loan.status = status\n    return 'ok-v2'"
+            return {
+                "result": "ok-v2",
+                "edits": TransactionEdit(
+                    edits=[
+                        ModifyObjectEdit(
+                            locator=ObjectLocator("Loan", "loan-sbx-v2"),
+                            properties={"status": "APPROVED"},
+                        )
+                    ]
+                ),
+            }
+
+    store = InMemoryGraphStore()
+    store.add_object("Loan", "loan-sbx-v2", {"status": "PENDING"})
+    repo = InMemoryActionRepository()
+    service = ActionService(
+        repo,
+        ActionRunner(),
+        DataFunnelService(store),
+        function_runtime=StubFunctionRuntime(),
+    )
+
+    # Register only function version 2 while action version is 1.
+    repo.add_function(
+        FunctionDefinition(
+            name="update_status",
+            runtime="python",
+            code_ref="def update_status_v2(loan, context, status):\n    loan.status = status\n    return 'ok-v2'",
+            version=2,
+        )
+    )
+    repo.add_action(
+        ActionDefinition(
+            name="SandboxActionV2",
+            description="Sandbox action v2",
+            function_name="update_status",
+            execution_mode=ActionExecutionMode.sandbox,
+            version=1,
+        )
+    )
+
+    execution = service.apply(
+        action_name="SandboxActionV2",
+        submitter="user-sbx",
+        input_payload={"status": "APPROVED"},
+        version=1,
+        input_instance_locators={"loan": {"object_type": "Loan", "primary_key": "loan-sbx-v2"}},
+    )
+
+    assert execution.status.value == "succeeded"
+
+
+def test_action_service_validates_entity_target_type() -> None:
+    store = InMemoryGraphStore()
+    store.add_object("Loan", "loan-t1", {"status": "PENDING"})
+    repo = InMemoryActionRepository()
+    service = ActionService(repo, ActionRunner(), DataFunnelService(store))
+
+    definition = ActionDefinition(
+        name="EntityTarget",
+        description="Entity target",
+        function_name="noop",
+        target_type=ActionTargetType.entity,
+        target_api_name="Borrower",
+        version=1,
+    )
+    repo.add_action(definition)
+    repo.add_function(FunctionDefinition(name="noop", runtime="python", code_ref="def noop(context): return 'ok'", version=1))
+
+    with pytest.raises(ValueError, match="does not match target_api_name"):
+        service.apply(
+            action_name="EntityTarget",
+            submitter="u",
+            input_payload={},
+            version=1,
+            input_instance_locators={"loan": {"object_type": "Loan", "primary_key": "loan-t1"}},
+        )
+
+
+def test_action_service_resolves_relation_input_and_validates_relation_target_type() -> None:
+    store = InMemoryGraphStore()
+    store.add_object("User", "u1", {"name": "A"})
+    store.add_object("Group", "g1", {"name": "B"})
+    repo = InMemoryActionRepository()
+    service = ActionService(repo, ActionRunner(), DataFunnelService(store))
+
+    captured = {}
+
+    def relation_action(membership: RelationInstance, context):
+        captured["link_type"] = membership.link_type
+        return "ok"
+
+    runner = ActionRunner()
+    runner.register("relation_action", relation_action)
+    service = ActionService(repo, runner, DataFunnelService(store))
+
+    definition = ActionDefinition(
+        name="RelationTarget",
+        description="Relation target",
+        function_name="relation_action",
+        target_type=ActionTargetType.relation,
+        target_api_name="MEMBER_OF",
+        version=1,
+    )
+    repo.add_action(definition)
+
+    execution = service.apply(
+        action_name="RelationTarget",
+        submitter="u",
+        input_payload={},
+        version=1,
+        input_instance_locators={
+            "membership": {
+                "link_type": "MEMBER_OF",
+                "from": {"object_type": "User", "primary_key": "u1"},
+                "to": {"object_type": "Group", "primary_key": "g1"},
+            }
+        },
+    )
+
+    assert execution.status.value == "succeeded"
+    assert captured["link_type"] == "MEMBER_OF"

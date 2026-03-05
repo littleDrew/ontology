@@ -25,6 +25,16 @@ class ActionStateStatus(str, Enum):
     failed = "failed"
 
 
+class ActionExecutionMode(str, Enum):
+    in_process = "in_process"
+    sandbox = "sandbox"
+
+
+class ActionTargetType(str, Enum):
+    entity = "entity"
+    relation = "relation"
+
+
 class CompensationFunction(Protocol):
     def __call__(self, input_instances: Dict[str, Any], payload: Dict[str, Any]) -> TransactionEdit: ...
 
@@ -60,6 +70,9 @@ class ActionDefinition:
     submission_criteria: Optional[Callable[[Dict[str, Any]], bool]] = None
     compensation_fn: Optional[CompensationFunction] = None
     saga_steps: Sequence[SagaStep] = field(default_factory=list)
+    execution_mode: ActionExecutionMode = ActionExecutionMode.in_process
+    target_type: ActionTargetType | None = None
+    target_api_name: str | None = None
     version: int = 1
     active: bool = True
 

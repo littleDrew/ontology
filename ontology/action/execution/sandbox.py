@@ -9,6 +9,8 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional
 
+from ..storage.edits import edit_from_dict
+
 
 @dataclass
 class BubblewrapConfig:
@@ -42,7 +44,7 @@ class BubblewrapRunner:
         return cmd
 
 
-    def run_inline_code(self, implementation_code: str, function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def run_sandboxed_code(self, implementation_code: str, function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.available():
             raise RuntimeError("bubblewrap is not available")
         with tempfile.TemporaryDirectory() as workdir:
@@ -50,8 +52,9 @@ class BubblewrapRunner:
             module_path = workdir_path / "user_function.py"
             module_path.write_text(implementation_code, encoding="utf-8")
             script_path = workdir_path / "sandbox_runner.py"
+            repo_root = str(Path(__file__).resolve().parents[3])
             script_path.write_text(
-                _sandbox_script("user_function", function_name),
+                _sandbox_script("user_function", function_name, repo_root),
                 encoding="utf-8",
             )
             input_data = json.dumps(payload).encode("utf-8")
@@ -67,42 +70,51 @@ class BubblewrapRunner:
             )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr.decode("utf-8"))
-            return json.loads(result.stdout.decode("utf-8"))
+            output = json.loads(result.stdout.decode("utf-8"))
+            if "edits" in output:
+                output["edits"] = edit_from_dict(output["edits"])
+            return output
 
-    def run(self, module_path: str, function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        if not self.available():
-            raise RuntimeError("bubblewrap is not available")
-        with tempfile.TemporaryDirectory() as workdir:
-            workdir_path = Path(workdir)
-            script_path = workdir_path / "sandbox_runner.py"
-            script_path.write_text(
-                _sandbox_script(module_path, function_name),
-                encoding="utf-8",
-            )
-            input_data = json.dumps(payload).encode("utf-8")
-            cmd = self.build_command(script_path)
-            result = subprocess.run(
-                cmd,
-                input=input_data,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-                timeout=self._config.timeout_s,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(result.stderr.decode("utf-8"))
-            return json.loads(result.stdout.decode("utf-8"))
-
-
-def _sandbox_script(module_path: str, function_name: str) -> str:
+def _sandbox_script(module_path: str, function_name: str, repo_root: str) -> str:
     return f"""
 import json
 import importlib
 import sys
 
+sys.path.insert(0, {repo_root!r})
+
+from ontology.action.execution.runtime import ActionRunner
+from ontology.action.storage.edits import ObjectInstance, ObjectLocator, RelationInstance, edit_to_dict
+
 payload = json.loads(sys.stdin.read())
 module = importlib.import_module({module_path!r})
 fn = getattr(module, {function_name!r})
-result = fn(**payload)
-print(json.dumps({{'result': result}}))
+input_instances = {{}}
+for name, item in payload.get("input_instances", {{}}).items():
+    kind = item.get("kind", "entity")
+    if kind == "relation":
+        input_instances[name] = RelationInstance(
+            link_type=item["link_type"],
+            from_locator=ObjectLocator(
+                object_type=item["from"]["object_type"],
+                primary_key=item["from"]["primary_key"],
+                version=item["from"].get("version"),
+            ),
+            to_locator=ObjectLocator(
+                object_type=item["to"]["object_type"],
+                primary_key=item["to"]["primary_key"],
+                version=item["to"].get("version"),
+            ),
+        )
+    else:
+        input_instances[name] = ObjectInstance(
+            object_type=item["object_type"],
+            primary_key=item["primary_key"],
+            properties=item.get("properties", {{}}),
+            version=item.get("version"),
+        )
+params = payload.get("params", {{}})
+metadata = payload.get("metadata", {{}})
+execution = ActionRunner().execute(fn, input_instances, params=params, metadata=metadata)
+print(json.dumps({{"result": execution["result"], "edits": edit_to_dict(execution["edits"])}}))
 """
