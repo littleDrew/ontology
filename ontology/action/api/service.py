@@ -191,7 +191,7 @@ class ActionService:
             function_definition = self._repository.get_function(definition.function_name)
             if function_definition is None:
                 raise ValueError(f"Function definition '{definition.function_name}' is not found")
-            return self.execute_in_sandox(
+            return self.execute_in_sandbox(
                 execution=execution,
                 definition=definition,
                 function_definition=function_definition,
@@ -208,7 +208,7 @@ class ActionService:
             input_instances=resolved_instances,
         )
 
-    def execute_in_sandox(
+    def execute_in_sandbox(
         self,
         execution: ActionExecution,
         definition: ActionDefinition,
