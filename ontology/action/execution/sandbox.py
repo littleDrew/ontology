@@ -12,6 +12,14 @@ from typing import Any, Dict, List, Optional
 from ..storage.edits import edit_from_dict
 
 
+class SandboxExecutionError(RuntimeError):
+    """Raised when sandbox process exits with an execution error."""
+
+
+class SandboxTimeoutError(RuntimeError):
+    """Raised when sandbox execution exceeds configured timeout."""
+
+
 @dataclass
 class BubblewrapConfig:
     """Configuration for bubblewrap sandbox execution constraints."""
@@ -30,19 +38,36 @@ class BubblewrapRunner:
     def available() -> bool:
         return shutil.which("bwrap") is not None
 
-    def build_command(self, script_path: Path) -> List[str]:
+    def build_command(self, script_path: Path, workdir: Path) -> List[str]:
         cmd = ["bwrap", "--die-with-parent", "--unshare-all"]
         if self._config.read_only_root:
             cmd.extend(["--ro-bind", "/", "/"])
         else:
             cmd.extend(["--bind", "/", "/"])
         cmd.extend(["--proc", "/proc"])
-        cmd.extend(["--dir", "/tmp"])
+        cmd.extend(["--tmpfs", "/tmp"])
+        cmd.extend(["--bind", str(workdir), "/workspace"])
+        cmd.extend(["--chdir", "/workspace"])
         if self._config.network_enabled:
             cmd.append("--share-net")
-        cmd.extend([self._config.python_executable, str(script_path)])
+        cmd.extend([self._config.python_executable, f"/workspace/{script_path.name}"])
         return cmd
 
+    def _run_process(self, cmd: List[str], input_data: bytes, cwd: Path) -> subprocess.CompletedProcess[bytes]:
+        try:
+            return subprocess.run(
+                cmd,
+                input=input_data,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=self._config.timeout_s,
+                cwd=str(cwd),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SandboxTimeoutError(
+                f"sandbox execution timed out after {self._config.timeout_s:.2f}s"
+            ) from exc
 
     def run_sandboxed_code(self, implementation_code: str, function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.available():
@@ -58,22 +83,19 @@ class BubblewrapRunner:
                 encoding="utf-8",
             )
             input_data = json.dumps(payload).encode("utf-8")
-            cmd = self.build_command(script_path)
-            result = subprocess.run(
-                cmd,
-                input=input_data,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-                timeout=self._config.timeout_s,
-                cwd=str(workdir_path),
-            )
+            cmd = self.build_command(script_path, workdir_path)
+            result = self._run_process(cmd, input_data=input_data, cwd=workdir_path)
             if result.returncode != 0:
-                raise RuntimeError(result.stderr.decode("utf-8"))
-            output = json.loads(result.stdout.decode("utf-8"))
+                stderr = result.stderr.decode("utf-8", errors="replace").strip()
+                raise SandboxExecutionError(stderr or f"sandbox exited with code {result.returncode}")
+            try:
+                output = json.loads(result.stdout.decode("utf-8"))
+            except json.JSONDecodeError as exc:
+                raise SandboxExecutionError("sandbox returned malformed JSON payload") from exc
             if "edits" in output:
                 output["edits"] = edit_from_dict(output["edits"])
             return output
+
 
 def _sandbox_script(module_path: str, function_name: str, repo_root: str) -> str:
     return f"""

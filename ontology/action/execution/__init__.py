@@ -2,7 +2,7 @@
 
 from .function_runtime import FunctionRuntime
 from .runtime import ActionRunner, Context, function_action
-from .sandbox import BubblewrapConfig, BubblewrapRunner
+from .sandbox import BubblewrapConfig, BubblewrapRunner, SandboxExecutionError, SandboxTimeoutError
 
 __all__ = [
     "ActionRunner",
@@ -11,4 +11,6 @@ __all__ = [
     "FunctionRuntime",
     "BubblewrapConfig",
     "BubblewrapRunner",
+    "SandboxExecutionError",
+    "SandboxTimeoutError",
 ]
