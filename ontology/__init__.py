@@ -29,7 +29,7 @@ from .action.api.service import (
 from .instance.api.service import DataFunnelResult, DataFunnelService, ValidationChain, InstanceService
 from .action.execution.function_runtime import FunctionRuntime
 from .action.execution.notifications import NotificationDispatcher, NotificationMessage, WebhookDispatcher
-from .action.execution.sandbox import BubblewrapConfig, BubblewrapRunner
+from .action.execution.sandbox import BubblewrapConfig, BubblewrapRunner, SandboxExecutionError, SandboxTimeoutError
 from .action.storage.edits import (
     AddLinkEdit,
     AddObjectEdit,
@@ -92,6 +92,8 @@ __all__ = [
     "WebhookDispatcher",
     "BubblewrapConfig",
     "BubblewrapRunner",
+    "SandboxExecutionError",
+    "SandboxTimeoutError",
     "ActionRunner",
     "ActionFeatureFlags",
     "Context",
