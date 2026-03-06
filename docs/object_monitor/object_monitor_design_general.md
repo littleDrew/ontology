@@ -1,713 +1,420 @@
 # Object Monitor 总体方案设计文档
 
-本文件聚焦 Object Monitor 的总体方案设计：包含背景目标、不同数据模式机制设计、目标架构、规格建议、风险治理、实施计划与 Phase 1 详细设计。
-Palantir/竞品调研分析请参考 `object_monitor_palantir_research.md`。
+> 本文基于最新调研文档 `object_monitor_palantir_research.md` 与既有设计约束，形成当前阶段可落地的总体方案设计；目标是在金融/制造、私有化部署、100w 对象、1000 规则、流批一体场景下，对齐 Palantir Object Monitor / Automate 的关键能力。
 
 ---
 
-## 1. 背景与目标
+## 1. 设计输入与目标
 
-本文面向“本体（Ontology）系统 + Object Monitor”建设，目标行业为金融与制造。目标是对标 Palantir Foundry Object Monitor 的核心能力，并形成可商用、可私有化部署、可持续演进的技术方案。
+### 1.1 已确认设计输入（来自调研 + 原有约束）
 
-### 1.1 目标约束（来自需求）
-- 行业：金融、制造（示例：银行级客户）。
-- 对象规模：约 100 万。
-- 规则规模：约 1000。
-- 用户规模：数千（含 Agent 调用 Action）。
-- 执行模式：流式 + 批量。
-- SLO：可用性 >=95%，RTO <= 1 小时。
-- 部署：私有云优先。
-- 成本：客户自有机器部署（偏向开源与可控组件）。
+1. **能力语义输入（Palantir）**
+   - 核心链路应为：`Monitor -> Input -> Condition -> Evaluation -> Activity`。
+   - 命中后输出链路应同时覆盖：`Notifications + Actions`。
+   - 必须具备治理边界：`Limits / Errors / Retry / Fallback / Manual execution`。
+
+2. **架构输入（OSv2 推断）**
+   - Monitor 不是 DB 内置规则，而是“对象状态之上的事件驱动评估运行时”。
+   - 评估触发应优先消费 `ObjectChangeEvent`（对象语义事件），而非直接耦合原始 CDC。
+   - 评估上下文构建应遵循“对象快照优先，必要时补充关联对象”。
+
+3. **业务与工程输入（本项目目标）**
+   - 行业：金融/制造。
+   - 规模：100w 对象、1000 规则、数千用户。
+   - 模式：流式 + 批量回放。
+   - SLO：可用性 >=95%，RTO <=1h，私有云优先。
+
+### 1.2 设计目标
+
+- 从“组件清单”升级为“语义闭环 + 运行闭环 + 治理闭环”的完整设计。
+- 保持 DSL 与 API 可演进，明确运行时可替换边界（Flink/Kafka/Temporal 可替换但语义不变）。
+- 明确复制/非复制/混合三模式下的一致性协议和降级策略，避免设计停留在原则层。
 
 ---
 
 ## 2. 不同数据模式下的 Object Monitor 机制设计
 
-## 2.1 复制模式（Copy/Materialized）详细设计
+### 2.1 复制模式（Copy/Materialized）下 Object Monitor 总体方案设计
 
-### 2.1.1 适用场景与核心原则
-- 适用于高频评估、低延迟要求、审计要求高的金融和制造核心流程。
+#### 2.1.1 适用场景与原则
+
+- 适用于高频评估、低延迟、强审计要求的核心流程（金融风控、制造设备安全）。
 - 原则：**评估不回源、对象投影就近读取、事件驱动增量更新**。
 
-### 2.1.2 架构逻辑视图（复制模式）
+#### 2.1.2 架构逻辑视图（Mermaid）
 
 ```mermaid
-flowchart TB
-    subgraph Src[源系统]
-      S1[业务DB/IoT/业务API]
+flowchart LR
+    subgraph SRC[源系统]
+      S1[业务DB / IoT / 业务API]
     end
 
-    subgraph Ingest[数据接入与复制]
-      C1[CDC/事件采集]
-      C2[Kafka]
-      C3[Projection Builder]
+    subgraph ING[接入与复制]
+      I1[CDC / Event Collector]
+      I2[Message Bus Kafka/Pulsar]
+      I3[Projection Builder]
     end
 
-    subgraph Store[对象存储层]
-      O1[(Object Projection Store
-PG/列存)]
-      O2[(Graph Store
-Neo4j/pggraph 可选)]
+    subgraph OBJ[对象存储与索引]
+      O1[(Object Projection Store)]
+      O2[(Relation/Graph Index)]
     end
 
-    subgraph Eval[评估层]
-      E1[Rule Matcher]
-      E2[Condition Evaluator]
-      E3[Duration State Store]
+    subgraph RT[Monitor Runtime]
+      R1[Event Filter]
+      R2[Context Builder]
+      R3[Condition Evaluator]
+      R4[Effect Planner/Executor]
     end
 
-    subgraph Out[输出层]
-      A1[Notification Dispatcher]
-      A2[Action Orchestrator]
-      A3[(Activity/Audit Ledger)]
+    subgraph GOV[治理与审计]
+      G1[(Evaluation Ledger)]
+      G2[(Activity Audit Ledger)]
+      G3[SLI/SLO + Replay]
     end
 
-    S1 --> C1 --> C2 --> C3
-    C3 --> O1
-    C3 --> O2
-    C2 --> E1 --> E2 --> E3
-    O1 --> E2
-    O2 --> E2
-    E2 --> A1
-    E2 --> A2
-    E2 --> A3
+    S1 --> I1 --> I2 --> I3
+    I3 --> O1
+    I3 --> O2
+    I2 --> R1 --> R2 --> R3 --> R4
+    O1 --> R2
+    O2 --> R2
+    R3 --> G1
+    R4 --> G2
+    G1 --> G3
+    G2 --> G3
 ```
 
-### 2.1.3 关键实现细节
-1. **投影构建**：按对象类型构建宽表/列存投影，关系类规则走图库查询。
-2. **一致性策略**：`at-least-once` 事件 + 投影幂等更新（source_version 去重）。
-3. **状态管理**：持续时长规则状态保存在流式状态库，定期 checkpoint。
-4. **审计**：每次评估写 `evaluation_id/monitor_version/input_snapshot_hash`。
+#### 2.1.3 机制设计（深入）
 
-### 2.1.4 可行性评估
-- **性能可行**：评估不依赖源系统，P95 延迟更可控。
-- **可靠性可行**：Kafka 重放 + 投影重建可实现 RTO <= 1h。
-- **风险**：复制链路延迟导致“新鲜度”问题。
-- **缓解**：引入 freshness SLI（如投影延迟秒数）并触发降级策略。
+1. **触发路径**：`CDC/Event -> Projection Builder -> Object Snapshot -> Evaluation`。
+2. **一致性协议**：`at-least-once event + idempotent projection + watermark`。
+3. **评估上下文构建**：优先读取对象投影快照，关系规则按需读取关系索引，避免高频回源 join。
+4. **状态与恢复**：duration/window 状态进入流式状态存储（checkpoint），支持故障后继续评估。
+5. **审计约束**：每次评估固化 `monitor_version + snapshot_hash + source_watermark`。
 
----
+#### 2.1.4 优势、风险与治理
 
-## 2.2 非复制模式（Non-copy/Virtualized）详细设计
+- 优势：延迟低、稳定性高、回放与取证简单。
+- 风险：复制链路抖动导致数据新鲜度下降。
+- 治理：`freshness_lag_ms` 超阈值时触发降级（暂停高风险动作，仅告警+审计）。
 
-### 2.2.1 适用场景与核心原则
-- 适用于数据主权强、复制受限、成本敏感或跨系统数据不易集中复制的场景。
+### 2.2 非复制模式（Non-copy/Virtualized）Object Monitor 总体方案设计
+
+#### 2.2.1 适用场景与原则
+
+- 适用于数据主权严格、复制受限、跨域数据难以集中落库的场景。
 - 原则：**按需回源 + 快照一致性 + 回源失败补偿**。
 
-### 2.2.2 架构逻辑视图（非复制模式）
+#### 2.2.2 架构逻辑视图（Mermaid）
 
 ```mermaid
-flowchart TB
-    subgraph Src[外部源系统]
-      S1[业务DB/数据服务]
-      S2[对象API/查询服务]
+flowchart LR
+    subgraph SRC[外部源系统]
+      S1[业务DB/对象服务]
+      S2[查询API/主数据服务]
     end
 
-    subgraph Runtime[监控运行时]
-      R1[Event Trigger]
-      R2[Input Resolver Adapter]
-      R3[Snapshot Cache]
-      R4[Condition Evaluator]
-      R5[Duration State Store]
+    subgraph RT[Monitor Runtime]
+      R1[ObjectChangeEvent Trigger]
+      R2[Event Filter]
+      R3[Input Resolver Adapter]
+      R4[Snapshot Cache]
+      R5[Context Builder]
+      R6[Condition Evaluator]
+      R7[Effect Planner/Executor]
     end
 
-    subgraph Ctrl[控制与补偿]
+    subgraph COMP[补偿与可用性]
       C1[Source Health Checker]
       C2[Delayed Evaluation Queue]
       C3[Compensation Replayer]
+      C4[Circuit Breaker / Rate Limit]
     end
 
-    subgraph Out[输出]
-      O1[Notification Dispatcher]
-      O2[Action Orchestrator]
-      O3[(Activity/Audit Ledger)]
+    subgraph GOV[治理与审计]
+      G1[(Evaluation Ledger)]
+      G2[(Activity Audit Ledger)]
+      G3[Source SLA Dashboard]
     end
 
-    R1 --> R2
-    R2 --> S1
-    R2 --> S2
-    R2 --> R3 --> R4 --> R5
-    R4 --> O1
-    R4 --> O2
-    R4 --> O3
-    C1 --> R2
-    C1 --> C2 --> C3 --> R4
+    R1 --> R2 --> R3
+    R3 --> S1
+    R3 --> S2
+    R3 --> R4 --> R5 --> R6 --> R7
+    C1 --> C4 --> R3
+    C1 --> C2 --> C3 --> R5
+    R6 --> G1
+    R7 --> G2
+    C1 --> G3
 ```
 
-### 2.2.3 关键实现细节
-1. **输入快照**：评估时生成 `input_snapshot_hash`，并记录 `source_version(lsn/watermark)`。
-2. **缓存策略**：对象输入短 TTL 缓存，避免重复回源。
-3. **容错补偿**：源不可用时把事件送入延迟队列，恢复后补评估。
-4. **持续时长规则**：仍由平台状态机维护，避免“每次回源重算持续时间”。
+#### 2.2.3 机制设计（深入）
 
-### 2.2.4 可行性评估
-- **合规可行**：最小化复制，符合数据主权要求。
-- **成本可行**：减少存储成本，但增加回源调用成本。
-- **风险**：源系统抖动影响评估稳定性与延迟。
-- **缓解**：
-  - 引入 source SLA 监控与熔断；
-  - 关键规则可切换到“半复制热缓存”模式；
-  - 审计链路始终保留原始来源版本戳。
+1. **触发路径**：`ObjectChangeEvent -> Input Resolver Adapter -> Source Pull -> Evaluation`。
+2. **一致性协议**：`snapshot_hash + source_version + delayed compensation`。
+3. **上下文质量控制**：每次回源记录数据来源与版本，必要时标注 `stale_context` 防止误触发高风险动作。
+4. **可用性策略**：短 TTL 缓存、源端熔断、延迟队列与恢复补评估。
+5. **审计约束**：记录回源来源、版本戳、拉取耗时、失败分类与补偿轨迹。
 
-## 2.3 混合模式（推荐）
+#### 2.2.4 优势、风险与治理
 
-- 高频监控字段复制（hot projection）。
-- 低频/大字段虚拟化访问（cold virtualized）。
-- 同时获得低延迟和低存储成本。
+- 优势：合规友好、降低复制存储成本。
+- 风险：上游源系统 SLA 抖动影响评估时效与稳定性。
+- 治理：按规则等级设策略，P1/P2 规则建议强制热缓存或切换半复制模式。
+
+### 2.3 混合模式（Hybrid，推荐默认）
+
+- 高频字段与关键对象走复制热投影。
+- 低频大字段与长尾对象按需虚拟化回源。
+- 选择策略：P1/P2 优先复制；P3/P4 可回源；支持按租户/规则动态切换。
 
 ---
 
-## 3. 对标 Object Monitor 的目标架构（建议）
+## 3. 目标能力模型（语义层）
+
+### 3.1 统一对象模型
+
+- `MonitorDefinition`：规则定义（作用域、输入绑定、条件表达式、输出策略、执行策略、版本）。
+- `InputBinding`：输入提取逻辑（对象属性、关系属性、聚合函数、外部数据适配器）。
+- `ConditionPlan`：可执行条件计划（阈值、持续时长、窗口聚合、组合逻辑）。
+- `EvaluationRecord`：一次求值结果（命中/未命中 + 原因 + 延迟 + 触发类型）。
+- `ActivityRecord`：求值后的执行轨迹（通知/动作结果、失败码、重试轨迹、审计信息）。
+
+### 3.2 语义兼容原则
+
+1. **向 Palantir 概念兼容**：保留 Monitor/Input/Condition/Evaluation/Activity 的语义映射。
+2. **向 Automate 能力对齐**：Effects 支持 `action/notification/function/logic/fallback`。
+3. **向审计与法务兼容**：任何回放均 append 新 activity，不覆盖历史记录。
+
+---
+
+## 4. 总体架构（控制面 + 数据面 + 治理面）
 
 ```text
-[Source Systems]
-   | CDC/Event API
-   v
-[Ingestion Bus: Kafka/Pulsar]
-   |--> [Projection Builder] --> [Object Store: PG + Graph(optional)]
-   |--> [Stream Evaluator: Flink CEP]
-
-[Monitor Service]
-   |- Monitor DSL / Versioning / RBAC
-   |- Input Resolver
-   |- Condition Engine (CEL/Drools)
-   |- Evaluation Orchestrator (stream + batch)
-
-[Action & Notification]
-   |- Temporal/Argo workflows
-   |- Email/SMS/IM/Webhook/ITSM connector
-
-[Activity & Audit]
-   |- Immutable logs (OpenSearch/ClickHouse)
-   |- Replay & Forensics
+            ┌──────────────────── Control Plane ────────────────────┐
+            │  Monitor DSL/API | Compiler | Versioning | RBAC       │
+            │  Publish/Pause/Rollback | Quota | Tenant Policies     │
+            └─────────────────────────────────────────────────────────┘
+                                  │ compiled plan
+                                  ▼
+┌────────────────────── Data Plane (Runtime) ───────────────────────────────┐
+│ Source -> Ingestion -> ObjectChangeEvent Bus                              │
+│         -> Event Filter -> Context Builder -> Condition Evaluator         │
+│         -> Evaluation Writer -> Effect Planner -> Effect Executor         │
+│         -> Activity Ledger + Retry/DLQ + Replay                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+                    ┌──────── Governance & Observability ────────┐
+                    │ SLI/SLO | Limits | Error Taxonomy | Audit  │
+                    │ Trace/Metric/Log | Manual Run | Forensics  │
+                    └─────────────────────────────────────────────┘
 ```
 
-### 3.1 关键模块
-- `MonitorDefinitionService`
-- `InputBindingService`
-- `ConditionCompiler`
-- `EvaluationRuntime`
-- `DurationStateStore`
-- `NotificationRouter`
-- `ActionOrchestrator`
-- `ActivityLedger`
-- `TenantQuotaService`
+### 4.1 关键分层职责
 
-### 3.2 关键能力
-- 流式 + 批量双引擎。
-- 持续时长规则（duration windows）。
-- 幂等动作执行与失败补偿。
-- 私有云部署与多租户隔离。
+1. **控制面（Control Plane）**
+   - 提供 DSL 校验、版本发布、租户策略、配额与权限。
+   - 输出编译后的 `ConditionPlan` 与 `EffectPlan` 到运行面。
+
+2. **运行面（Runtime/Data Plane）**
+   - 消费对象变更事件并做候选规则过滤。
+   - 构建评估上下文并执行条件求值。
+   - 命中后执行 effect 链路，失败按 fallback 与重试策略处理。
+
+3. **治理面（Governance）**
+   - 统一 errors/limits 模型与可观测指标。
+   - 支持手动执行、回放、法务审计导出。
 
 ---
 
-## 4. 规格建议（按当前规模）
+## 5. 核心执行链路设计（事件触发）
 
-### 4.1 目标规格（首版）
-- 对象：100 万。
-- 规则：1000。
-- 峰值评估吞吐：建议按 300~800 eval/s 设计。
-- 持续时长规则状态键：按 100 万对象 * 活跃规则比例估算状态容量。
+### 5.1 Event Filter（候选规则筛选）
 
-### 4.2 SLO/SRE
-- 可用性：建议从 95% 逐步提升到 99.5%。
-- RTO：<=1 小时（通过分层恢复 + 重放队列实现）。
-- RPO：建议 <= 5 分钟（关键元数据强一致备份）。
+三段式过滤，避免全量规则求值：
+
+1. `objectType` 预过滤。
+2. `scope/tenant/tag` 过滤。
+3. `changedFields` 增量过滤（仅字段相关规则进入候选集）。
+
+输出：`MatchedMonitorCandidates[]`，包含 `monitorId/version/requiredInputsRef`。
+
+### 5.2 Context Builder（评估上下文构建）
+
+按优先级读取：
+
+1. 对象快照（复制模式优先）。
+2. 关系对象（按 InputBinding 声明拉取）。
+3. 外部输入（非复制模式按适配器拉取并缓存）。
+
+输出：`EvaluationContext`（含 `snapshot_hash`、`source_watermark`、`data_freshness_ms`）。
+
+### 5.3 Condition Evaluator（条件求值）
+
+支持三类规则：
+
+1. 阈值/布尔规则（即时判断）。
+2. 持续时长规则（状态机维护：`IDLE->ENTERED->FIRING->COOLDOWN`）。
+3. 窗口聚合规则（count/sum/rate over window）。
+
+输出：`EvaluationRecord(match/reason/latency/triggerType)`。
+
+### 5.4 Effect Execution（动作与通知执行）
+
+执行策略：
+
+- 主 effect 并行或串行（按策略配置）。
+- 失败重试：指数退避 + 最大重试次数。
+- 主 effect 失败后触发 fallback effect。
+- 所有 effect 写 `idempotency_key` 保障幂等。
+
+输出：`ActivityRecord(effect_results/retry_trace/error_code)`。
 
 ---
 
-## 5. 风险与治理
+## 6. DSL 与规则治理设计（v0.2）
 
-1. **规则爆炸风险**：规则组合指数增长导致评估风暴。
-   - 对策：规则分层、租户配额、复杂度评分、熔断。
-2. **动作风暴风险**：同一事件触发大量下游动作。
-   - 对策：去重键、抑制窗口、最大并发限制。
-3. **非复制模式可用性风险**：外部源不稳定导致漏评估。
-   - 对策：快照缓存 + 回补重算 + source watermark 审计。
-4. **图数据库热点风险**：高频规则全打到图查询。
-   - 对策：图关系预计算 + 缓存 + 流式状态化。
+### 6.1 DSL 必备能力
+
+1. `scope`：对象类型 + 过滤器。
+2. `input`：多输入绑定（对象属性、关系属性、外部适配器）。
+3. `condition`：布尔表达式 + `duration()` + 窗口函数。
+4. `effects`：action/notification/function/logic/fallback。
+5. `policy`：dedup、cooldown、severity、retry、rate-limit。
+
+### 6.2 语义约束
+
+- 条件表达式必须返回 `bool`。
+- 单规则 AST 节点数、嵌套深度、输入绑定数设上限。
+- 编译期必须生成 `field dependency index`（服务 Event Filter）。
+
+### 6.3 冲突裁决
+
+默认策略：`highest-severity-wins`。
+可选：`multi-fire` / `first-match`。
+
+同快照、同版本下结果必须确定性一致。
 
 ---
 
-## 6. 分阶段实施计划
+## 7. API 与错误模型（控制面/数据面）
+
+### 7.1 控制面 API
+
+- `POST /v1/monitors`：创建规则。
+- `POST /v1/monitors/{id}/publish`：发布版本。
+- `POST /v1/monitors/{id}/pause`：暂停规则。
+- `POST /v1/monitors/{id}/rollback`：回滚版本。
+- `POST /v1/monitors/{id}/manual-run`：手动执行。
+- `POST /v1/monitors/{id}/replay`：按时间窗回放。
+- `GET /v1/monitors/{id}/activities`：活动检索。
+
+### 7.2 数据面 API
+
+- `POST /v1/object-events`：写入对象变更事件。
+- `POST /v1/evaluations/pull`：非复制模式触发回源评估。
+- `POST /v1/input-cache/refresh`：主动刷新缓存。
+
+### 7.3 错误码
+
+- `MONITOR_VALIDATION_ERROR`
+- `MONITOR_VERSION_CONFLICT`
+- `MONITOR_PERMISSION_DENIED`
+- `MONITOR_IDEMPOTENCY_CONFLICT`
+- `MONITOR_RATE_LIMITED`
+- `MONITOR_SOURCE_UNAVAILABLE`
+- `MONITOR_EFFECT_EXECUTION_FAILED`
+
+并发写操作要求 `If-Match`/`version`；冲突返回 `409`。
+
+---
+
+## 8. 可观测性与 SRE 设计
+
+### 8.1 核心 SLI
+
+1. `evaluation_latency_p95`
+2. `event_to_activity_e2e_latency_p95`
+3. `effect_success_rate`
+4. `freshness_lag_ms`（复制模式）
+5. `source_call_error_rate`（非复制模式）
+6. `replay_backlog_size`
+
+### 8.2 SLO 建议
+
+- Phase 1：可用性 >=95%，P95 评估延迟 <3s。
+- Phase 2：可用性 >=99.5%，通知成功率 >99.9%。
+- RTO <=1h，关键链路“允许延迟，不允许无审计丢失”。
+
+### 8.3 失败恢复机制
+
+- Kafka/Flink/执行器均支持重放与幂等。
+- 失败事件进入 DLQ，带错误分类和重试轨迹。
+- 回放与在线流量隔离，避免二次风暴。
+
+---
+
+## 9. 技术选型建议（私有化优先）
+
+### 9.1 推荐基线
+
+- 消息总线：Kafka（或 Pulsar）。
+- 流式评估：Flink（CEP + 状态管理）。
+- 控制与 API：Python/Go 服务。
+- 存储：PostgreSQL（定义 + 活动），ClickHouse/OpenSearch（审计检索）。
+- 编排：Temporal（动作执行与补偿）。
+
+### 9.2 可替换原则
+
+所有基础设施可替换，但需满足三项不变约束：
+
+1. 事件可重放。
+2. 状态可 checkpoint + 恢复。
+3. effect 执行可幂等且可追溯。
+
+---
+
+## 10. 分阶段实施计划
 
 ### Phase 1（8~10 周）
-- Monitor DSL、规则管理、基础流式评估、通知、活动日志。
+
+- DSL v0.2（阈值 + 持续时长 + 基础窗口）。
+- 控制面（创建/发布/暂停/回滚）。
+- Runtime MVP（Event Filter/Context Builder/Evaluator/Activity）。
+- 通知通道（Email + Webhook）。
+- 观测面板与基础告警。
 
 ### Phase 2（8~12 周）
-- 动作编排、持续时长高级规则、批量回补、审计回放。
+
+- Effect 执行器完善（action/function/logic/fallback）。
+- 批量回放与对账。
+- Non-copy 适配器、缓存、补偿链路。
+- 多租户配额与复杂度治理。
 
 ### Phase 3（持续）
-- 混合存储优化（复制/非复制协同）、行业模板（金融/制造）、智能规则推荐。
+
+- 行业模板（金融风控、制造设备健康）。
+- 规则推荐与冲突检测。
+- 成本优化（冷热分层、状态压缩、弹性扩缩容）。
 
 ---
 
-## 7. 下一步（用于 PR 持续迭代，已展开为可执行设计）
+## 11. 验收标准（可直接用于里程碑 Gate）
 
-本节将上一版“后续任务”落地为可以直接进入研发排期的设计产物。
-
-### 7.1 竞品矩阵（产品 / 组合 / 开源）
-
-> 目标：从“功能可比”升级到“实现可比 + 可落地可运维可迁移”。
-
-| 类别 | 方案 | Object Model | Rule/Eval | Duration Rule | Action Orchestration | Audit/Replay | 私有云适配 | 与 Palantir Object Monitor 关系 |
-|---|---|---|---|---|---|---|---|---|
-| 厂商产品 | ServiceNow Event Mgmt + CMDB | 强（CI） | 中 | 弱-中 | 强（工单/流程） | 中 | 强 | 运维对象闭环近似，但通用本体语义不足 |
-| 厂商产品 | Datadog Monitors + Workflow | 中 | 强 | 中 | 强 | 中 | 中 | 执行层强，Ontology 层弱 |
-| 厂商产品 | Splunk ITSI/ES | 中 | 强 | 中 | 中 | 强 | 中 | 事件关联强，业务对象语义需外置 |
-| 厂商产品 | Dynatrace + AutomationEngine | 中 | 强 | 中 | 中-强 | 中 | 中 | 技术拓扑监控强，不是业务本体中心 |
-| 厂商产品 | Elastic Alerting/Watcher | 弱-中 | 中-强 | 弱-中 | 中 | 中 | 强 | 可构建 condition/eval，复杂关系表达有限 |
-| 云原生 | AWS/Azure/GCP Alerting | 弱 | 强 | 中 | 中 | 中 | 弱（私有云） | 可借鉴机制，不是私有化首选 |
-| 开源组合 | Kafka + Flink CEP + Temporal + PG | 中-强 | 强 | 强 | 强 | 强 | 强 | 能力面最接近，可工程化复刻 |
-| 开源组合 | Kafka Streams + Drools + Argo | 中 | 中-强 | 中 | 强 | 中 | 强 | 轻量可行，复杂 CEP 不如 Flink |
-| 开源组合 | Pulsar + Flink + ClickHouse | 中 | 强 | 强 | 中-强 | 强 | 中-强 | 高吞吐强，整合复杂 |
-| 开源组合 | Debezium + NATS + CEL + Prefect | 中 | 中 | 中 | 中 | 中 | 强 | MVP 速度快，峰值弹性一般 |
-| 图中心 | Neo4j + Kafka + Flink + Temporal | 强 | 强 | 强 | 强 | 强 | 中-强 | 关系规则最佳，成本与运维较高 |
-| 图中心 | JanusGraph + Cassandra + Flink | 强 | 强 | 强 | 中 | 中-强 | 中 | 超大规模扩展强，工程门槛高 |
-
-**结论**：当前约束（金融/制造 + 私有云 + 100w 对象 + 1000 规则）下，首选仍是 `Kafka + Flink CEP + Temporal + PostgreSQL(+可选图库)`。
-
-### 7.2 Object Monitor DSL 草案（可进入 PoC）
-
-#### 7.2.1 语法草案（简化 BNF）
-
-```bnf
-monitor          ::= "monitor" IDENT "{" scope input condition schedule action notify policy "}"
-scope            ::= "scope" "{" object_type object_filter? "}"
-object_type      ::= "objectType" ":" IDENT
-object_filter    ::= "filter" ":" EXPR
-input            ::= "input" "{" binding+ "}"
-binding          ::= IDENT ":" source_expr
-condition        ::= "condition" ":" bool_expr
-schedule         ::= "schedule" ":" ("event"|cron_expr)
-action           ::= "action" "{" action_call* "}"
-notify           ::= "notify" "{" channel_rule* "}"
-policy           ::= "policy" "{" dedup cooldown severity retry "}"
-dedup            ::= "dedupKey" ":" EXPR
-cooldown         ::= "cooldown" ":" DURATION
-severity         ::= "severity" ":" ("P1"|"P2"|"P3"|"P4")
-retry            ::= "retry" ":" retry_spec
-```
-
-#### 7.2.2 示例 1：状态变化触发
-
-```yaml
-monitor HighTempSpike {
-  scope {
-    objectType: Boiler
-    filter: region == "CN-NORTH"
-  }
-  input {
-    t: object.temperature
-    threshold: object.maxSafeTemperature
-  }
-  condition: t > threshold
-  schedule: event
-  action {
-    call CreateMaintenanceTicket(priority="P2")
-  }
-  notify {
-    channel email(to="ops@company.com") when severity in ["P1","P2"]
-    channel webhook(url="https://alert-gw/internal")
-  }
-  policy {
-    dedupKey: object.id + ":" + monitor.name
-    cooldown: 10m
-    severity: P2
-    retry: exp(backoff=5s,max=5)
-  }
-}
-```
-
-#### 7.2.3 示例 2：持续时长规则（高温持续 1 小时）
-
-```yaml
-monitor HighTempFor1h {
-  scope {
-    objectType: Furnace
-  }
-  input {
-    t: object.temperature
-  }
-  condition: duration(t > 120, "1h")
-  schedule: event
-  action {
-    call StopProductionLine(lineId=object.lineId)
-  }
-  notify {
-    channel sms(to=object.ownerPhone)
-    channel im(room="manufacture-warroom")
-  }
-  policy {
-    dedupKey: object.id + ":high-temp-1h"
-    cooldown: 30m
-    severity: P1
-    retry: exp(backoff=10s,max=8)
-  }
-}
-```
-
-### 7.3 复制 / 非复制 模式 API 与一致性策略（详细）
-
-#### 7.3.1 控制面 API（两种模式通用）
-- `POST /v1/monitors`：创建监控规则（返回 monitorId + version）。
-- `POST /v1/monitors/{id}/publish`：发布到运行态。
-- `POST /v1/monitors/{id}/pause`：暂停。
-- `GET /v1/monitors/{id}/activity?from=&to=`：查询评估活动。
-- `POST /v1/monitors/{id}/replay`：按时间窗重放评估。
-
-#### 7.3.2 数据面 API（复制模式）
-- `POST /v1/object-events`：接收 CDC/事件。
-- `GET /v1/object-projection/{objectType}/{objectId}`：读取投影快照。
-- 一致性：`at-least-once event + idempotent projection + version watermark`。
-
-#### 7.3.3 数据面 API（非复制模式）
-- `POST /v1/evaluation/pull`：触发回源评估。
-- `POST /v1/input-resolver/cache/refresh`：刷新输入缓存。
-- 一致性：`snapshot-hash + source-version(lsn/watermark) + delayed-compensation`。
-
-#### 7.3.4 关键一致性约束
-1. 每次评估必须写 `evaluation_id`、`monitor_version`、`input_snapshot_hash`。
-2. 每次动作执行必须写 `action_idempotency_key`。
-3. 回放评估不得覆盖原活动记录，只能 append 新纪录并链路关联。
-
-### 7.4 性能与可靠性验证设计（压测 / 演练）
-
-#### 7.4.1 基线压测场景
-- 对象 100w，规则 1000，活跃规则比例 20%。
-- 变更事件峰值：2000 events/s，持续 30 分钟。
-- 目标：评估延迟 P95 < 3s；通知成功率 > 99.9%。
-
-#### 7.4.2 故障注入场景
-- Kafka Broker 故障（单点/双点）。
-- Flink TaskManager 重启。
-- 图数据库热点查询超时。
-- 外部通知网关不可用 15 分钟。
-
-#### 7.4.3 验收门槛（首期）
-- 可用性 >= 95%（建议冲刺 99.5%）。
-- RTO <= 1h。
-- 关键事件零丢失（允许延迟，不允许无审计漏记）。
-
-### 7.5 研发拆解（可直接进 Jira）
-
-1. **M1 - DSL 与编译器**：语法、静态检查、版本化。
-2. **M2 - 流式运行时**：duration 状态机、去重、冷却窗口。
-3. **M3 - 批量回补**：日/小时重算、结果对账。
-4. **M4 - Action 编排**：幂等、重试、补偿、死信。
-5. **M5 - 审计与回放**：活动账本、法务导出、可追溯。
-6. **M6 - 多租户治理**：配额、限流、权限边界。
-7. **M7 - 观测与 SRE**：SLI/SLO、看板、告警、演练。
-
-### 7.6 下一轮文档增量（PR-2 目标）
-
-- 增加《Object Monitor DSL 规范（v0.1）》独立文档。
-- 增加《Copy/Non-copy 一致性协议》时序图与状态机图。
-- 增加《竞品矩阵 CSV》可排序版本（含成本/运维评分）。
-- 增加《压测与故障演练报告模板》。
-
-
-### 7.7 DSL 语义约束（新增）
-
-为避免 DSL 只停留在语法层，补充以下语义约束：
-
-1. **类型系统**
-- 标量：`int/float/string/bool/datetime/duration`
-- 复合：`list<T>/map<K,V>/object-ref`
-- 规则条件必须返回 `bool`，否则编译失败。
-
-2. **函数白名单**
-- 基础：`abs, ceil, floor, round, coalesce`
-- 字符串：`contains, startsWith, endsWith, regexMatch`
-- 时间：`now, dateDiff, window`
-- 时长：`duration(expr, span)`
-
-3. **复杂度阈值**
-- AST 节点数 <= 200
-- 嵌套深度 <= 12
-- 单条规则输入绑定数 <= 50
-- 超限需进入人工审批，不可直接发布。
-
-4. **兼容性策略**
-- DSL 版本采用 `major.minor`。
-- `minor` 向后兼容；`major` 允许破坏性变更，需自动迁移器或人工确认。
-
-### 7.8 规则冲突裁决与去重范围（新增）
-
-当同一对象同一时刻命中多条规则时，采用分层裁决：
-
-1. **优先级**：`severity(P1>P2>P3>P4)` -> `rule_weight` -> `rule_id`
-2. **裁决策略**（按租户可配置）：
-- `highest-severity-wins`（默认）
-- `multi-fire`（多条并发触发）
-- `first-match`（按规则序）
-
-3. **去重范围（Dedup Scope）**
-- `object`：同对象去重
-- `rule`：同规则去重
-- `tenant`：同租户去重
-
-4. **一致性约束**
-- 相同输入快照 + 相同 monitor_version，裁决结果必须确定性一致。
-
-### 7.9 API 错误模型与并发控制（新增）
-
-#### 错误码建议
-- `MONITOR_VALIDATION_ERROR`：DSL 语义/语法失败
-- `MONITOR_VERSION_CONFLICT`：发布/回滚版本冲突
-- `MONITOR_PERMISSION_DENIED`：权限不足
-- `MONITOR_IDEMPOTENCY_CONFLICT`：幂等键冲突
-- `MONITOR_RATE_LIMITED`：超租户配额
-
-#### 并发控制
-- 所有修改类接口要求 `If-Match: <etag>` 或 `version` 字段。
-- 不满足并发条件返回 `409 Conflict`。
-
-#### 幂等控制
-- `POST /v1/monitors`、`/publish`、`/rollback` 支持 `Idempotency-Key`。
-- 幂等窗口默认 24 小时，支持租户级覆盖。
+1. **正确性**：同输入快照、同版本下评估结果一致率 100%。
+2. **可靠性**：注入 Broker/Flink/通知网关故障后，RTO 满足 <=1h。
+3. **审计性**：任一 activity 能追溯到 monitor_version + snapshot_hash + effect_trace。
+4. **性能**：在 100w 对象、1000 规则、2000 events/s 峰值下，P95 评估延迟 <3s。
+5. **治理性**：复杂规则超阈值可拦截；租户超配额可限流且不影响其他租户。
 
 ---
 
-## 8. Phase 1（8~10 周）详细设计方案
+## 12. 当前方案关键升级点
 
-> 目标：在 8~10 周内交付“可上线试运行”的第一版能力：Monitor DSL、规则管理、基础流式评估、通知、活动日志。
-
-### 8.1 Phase 1 范围边界（In Scope / Out of Scope）
-
-#### In Scope
-1. Monitor DSL v0.1（阈值 + 持续时长条件，含基础去重/冷却策略）。
-2. 规则管理控制台/接口（创建、发布、暂停、版本回滚）。
-3. 基础流式评估引擎（事件驱动 + 状态机）。
-4. 通知通道（Email/Webhook/企业IM 三选二起步）。
-5. 活动日志（评估记录、命中记录、通知记录，支持审计检索）。
-
-#### Out of Scope（Phase 2+）
-1. 复杂动作编排（多步补偿、跨系统事务）。
-2. 批量全量回补与高级对账。
-3. AI 规则推荐、复杂图推理。
-
-### 8.2 逻辑架构（Phase 1）
-
-```text
-[Object Event Sources]
-   -> [Ingestion Adapter]
-   -> [Kafka Topic: object-events]
-   -> [Rule Matcher]
-   -> [Input Resolver]
-   -> [Condition Evaluator + Duration State Store]
-   -> [Evaluation Result Topic]
-   -> [Notification Dispatcher]
-   -> [Activity Log Writer]
-
-[Monitor Control Plane]
-   -> [DSL Parser/Validator]
-   -> [Rule Registry + Versioning]
-   -> [Publish/Pause API]
-```
-
-### 8.3 数据模型详细设计
-
-#### 8.3.1 控制面表
-- `monitor_definition`
-  - `monitor_id`、`tenant_id`、`name`、`dsl_text`、`status`、`created_by`、`created_at`。
-- `monitor_version`
-  - `version_id`、`monitor_id`、`version`、`compiled_plan`、`checksum`、`published_at`。
-- `monitor_publish_history`
-  - `id`、`monitor_id`、`version`、`operation(publish/pause/rollback)`、`operator`、`ts`。
-
-#### 8.3.2 运行面表
-- `evaluation_activity`
-  - `evaluation_id`、`tenant_id`、`monitor_id`、`monitor_version`、`object_ref`、`event_time`、`result`、`latency_ms`、`input_snapshot_hash`。
-- `notification_activity`
-  - `id`、`evaluation_id`、`channel`、`payload_hash`、`status`、`retry_count`、`sent_at`。
-- `duration_state`
-  - `state_key(tenant+monitor+object)`、`entered_at`、`last_seen_at`、`state_payload`。
-
-### 8.4 API 详细设计（Phase 1）
-
-#### 控制面
-- `POST /v1/monitors`
-  - 输入：DSL 文本 + 元数据。
-  - 校验：语法、字段类型、引用对象类型存在性。
-  - 输出：`monitor_id`。
-- `POST /v1/monitors/{id}/publish`
-  - 动作：冻结当前版本并下发到运行时缓存。
-- `POST /v1/monitors/{id}/pause`
-  - 动作：运行时停用，不删除历史。
-- `POST /v1/monitors/{id}/rollback?version=x`
-  - 动作：回滚到历史稳定版本。
-- `GET /v1/monitors/{id}/activities`
-  - 支持按时间窗、对象、结果筛选。
-
-#### 数据面
-- `POST /v1/object-events`
-  - 字段：`tenant_id`、`object_type`、`object_id`、`event_type`、`event_ts`、`payload`、`source_version`。
-  - 幂等键：`tenant_id + source + source_event_id`。
-
-### 8.5 核心执行流程与状态机
-
-#### 8.5.1 阈值规则
-1. 事件进入 Rule Matcher。
-2. 按 object_type + filter 命中规则集合。
-3. Input Resolver 提取输入。
-4. Condition Evaluator 计算布尔结果。
-5. 命中后写 evaluation_activity，异步触发通知。
-
-#### 8.5.2 持续时长规则（duration）
-状态机：`IDLE -> ENTERED -> FIRING -> COOLDOWN -> IDLE`
-- `IDLE`: 条件不满足。
-- `ENTERED`: 首次满足条件，记录 `entered_at`。
-- `FIRING`: `now - entered_at >= duration`，触发一次。
-- `COOLDOWN`: 冷却期内抑制重复通知。
-
-### 8.6 非功能设计（Phase 1）
-
-#### 性能预算（100w 对象 / 1000 规则）
-- 事件摄入目标：>= 1000 events/s（可突发 2000）。
-- 评估延迟：P95 < 3s，P99 < 8s。
-- 通知投递成功率：> 99.9%（重试后）。
-
-#### 可用性与恢复
-- 运行时无状态组件多副本。
-- 状态存储（duration_state）使用高可用后端（Redis Cluster 或 RocksDB + checkpoint）。
-- RTO <= 1h：基于 Kafka 重放 + 规则版本恢复。
-
-#### 安全与审计
-- 租户隔离：所有主键包含 `tenant_id`。
-- 审计：发布/暂停/回滚、规则变更、通知发送均落审计日志。
-- 权限：`monitor.admin`、`monitor.editor`、`monitor.viewer`。
-
-### 8.7 交付拆解（按周）
-
-- **W1-W2**：DSL 语法、Parser、静态校验、对象类型联调。
-- **W3-W4**：规则注册中心、发布/暂停/回滚 API、运行时规则缓存。
-- **W5-W6**：流式评估 + duration 状态机 + 活动日志。
-- **W7**：通知通道（Email/Webhook/IM）+ 重试与去重。
-- **W8**：端到端联调、压测、故障演练。
-- **W9-W10（缓冲）**：性能优化、问题修复、试运行验收。
-
-### 8.8 验收标准（Definition of Done）
-
-1. 支持 200+ 条 DSL 规则稳定发布与执行。
-2. 持续时长规则准确率 >= 99.99%（对照离线回算基准）。
-3. 可观测指标齐全：吞吐、延迟、命中率、通知失败率、重试次数。
-4. 关键审计链路可查询并可导出。
-
-
-### 8.9 功能验收清单（按功能域，新增）
-
-除性能验收外，Phase 1 增加功能验收条目：
-
-1. **规则生命周期**
-- 支持创建、发布、暂停、回滚。
-- 每次发布必须经过 `dry-run -> canary -> full rollout`。
-
-2. **规则能力**
-- 必须支持阈值规则与持续时长规则。
-- 持续时长规则在重启后可恢复状态，且误差在定义窗口内。
-
-3. **通知治理**
-- 支持抑制（suppression）、聚合（aggregation）、升级（escalation）、静默窗口（maintenance window）。
-- 任一通知事件可追溯 dedupKey、命中策略与重试轨迹。
-
-4. **调查与审计**
-- 任一告警可追溯：对象快照 -> 规则版本 -> 通知动作。
-- 支持按租户/规则/对象维度查询与导出。
-
----
-
-## 9. 作为专业架构师的评估、问题识别与优化方案
-
-本节先对“初版 Phase 1 设计”进行批判性评估，再给出修正后的优化版。
-
-### 9.1 架构评估（评审结论）
-
-#### 评分（5 分制）
-- 需求覆盖度：4.5
-- 可实现性：4.0
-- 可运维性：3.8
-- 可扩展性：4.2
-- 风险可控性：3.7
-
-**总体结论**：方案可落地，但在“规则爆炸防护、状态存储恢复、通知风暴抑制、配置漂移治理”上需强化。
-
-### 9.2 识别到的问题清单
-
-1. **问题 P1：规则匹配效率风险**
-   - 现状：按 object_type/filter 动态筛选，规则数增长后匹配开销变大。
-   - 风险：高峰期 evaluation 队列积压。
-
-2. **问题 P2：duration 状态恢复缺口**
-   - 现状：仅描述了状态机，未定义 checkpoint 与恢复一致性细节。
-   - 风险：重启后持续时长判断偏差。
-
-3. **问题 P3：通知风暴与外部依赖抖动**
-   - 现状：仅有重试，缺少分级限流与抑制策略矩阵。
-   - 风险：下游网关故障时级联放大。
-
-4. **问题 P4：多租户资源竞争**
-   - 现状：配额原则有描述，但缺少强制执行点。
-   - 风险：大租户挤占资源影响全局。
-
-5. **问题 P5：变更治理不足**
-   - 现状：规则发布流程缺“灰度发布 + 自动回滚”机制。
-   - 风险：错误规则全量生效造成误报/漏报。
-
-### 9.3 优化后方案（修订版）
-
-#### O1. 规则索引与分片优化（解决 P1）
-- 预编译规则为 `match_plan`，构建二级索引：`object_type -> predicate bucket`。
-- 按 `tenant_id + object_type` 做运行时分区，减小单分区规则集。
-- 增加“规则复杂度评分”，超过阈值需审批发布。
-
-#### O2. 状态一致性与恢复优化（解决 P2）
-- duration 状态采用双写策略：
-  - 热状态：本地状态存储（Flink state/RocksDB）。
-  - 冷恢复：周期 checkpoint + 外部快照（对象存储）。
-- 恢复流程：`load checkpoint -> replay from watermark -> reconcile`。
-
-#### O3. 通知稳态控制（解决 P3）
-- 引入通知策略矩阵：`severity x channel x retry_policy x throttle`。
-- 增加熔断与退避：当下游故障率 > 阈值，自动切换降级通道。
-- 同一 dedupKey 在窗口内只发送一次（窗口可按级别配置）。
-
-#### O4. 多租户 QoS（解决 P4）
-- 每租户独立配额：`events/s`、`active_rules`、`notifications/min`。
-- 调度采用加权公平队列（WFQ），避免大租户抢占。
-- 超配额事件进入延迟队列并打审计标记。
-
-#### O5. 发布治理（解决 P5）
-- 规则发布改为三段式：`staging -> canary(5%) -> full`。
-- Canary 失败触发自动回滚并阻断全量发布。
-- 发布前强制执行“静态规则体检 + 小样本回放测试”。
-
-### 9.4 优化后的 Phase 1 目标值（更新）
-
-- 事件峰值能力：2000 events/s 持续 30 分钟不丢失。
-- 评估延迟：P95 < 2.5s（较初版收紧）。
-- 误通知率：< 0.1%。
-- 规则发布失败自动回滚时间：< 2 分钟。
-
-### 9.5 优化后验收清单（新增）
-
-1. 通过“规则风暴压测”与“通知网关故障演练”。
-2. 完成一次生产前灰度发布演练（含自动回滚）。
-3. 完成一次租户配额冲突演练并验证 WFQ 生效。
-4. 完成一次 checkpoint 恢复演练并验证 duration 连续性。
-
-
-### 9.6 问题闭环跟踪表（新增）
-
-为确保优化项可执行，补充问题跟踪模板：
-
-| 问题ID | 问题描述 | 功能改造项 | 验收标准 | Owner | 截止时间 | 状态 |
-|---|---|---|---|---|---|---|
-| P1 | 规则匹配效率风险 | 引入 match_plan 二级索引 | 峰值 2000 events/s 下无积压 | 待定 | 待定 | Open |
-| P2 | duration 恢复缺口 | checkpoint + replay + reconcile | 重启后时长误差在定义窗口内 | 待定 | 待定 | Open |
-| P3 | 通知风暴风险 | 分级限流+熔断+降级路由 | 下游故障时告警成功率>99% | 待定 | 待定 | Open |
-| P4 | 多租户资源竞争 | WFQ + 租户配额强制执行 | 大租户不会挤占全局资源 | 待定 | 待定 | Open |
-| P5 | 发布治理不足 | dry-run/canary/自动回滚 | canary 失败 2 分钟内回滚 | 待定 | 待定 | Open |
-
-
-
----
+1. 从“组件堆叠”升级为“语义模型驱动”的架构设计。
+2. 显式引入 `Event Filter + Context Builder` 两级降本机制。
+3. 将 fallback/手动执行/错误分类纳入一等公民能力。
+4. 将 Copy/Non-copy 的一致性协议从概念描述升级为可实施约束。
+5. 补全可观测与验收闭环，支持从 PoC 到生产的治理落地。
