@@ -1,15 +1,16 @@
-# Object Monitor 对标调研文档（Palantir / 竞品 / 存储模式）
+# Object Monitor 对标调研文档（Palantir / 竞品 ）
 
 本文件聚焦 Object Monitor 的调研部分：包含 Palantir 能力拆解、OSv2 架构下方案分析、竞品全景对比与存储模式分析。
 方案设计与实施内容已拆分至 `object_monitor_design_general.md`。
 
----
 
-## 2. Palantir Object Monitor 能力拆解与关联模型
+本文聚焦 Object Monitor 的调研与对标分析，覆盖 Palantir 能力拆解、OSv2 推断、竞品对比与开源实现路径；为便于落地讨论，文档后半部分按模块给出开源方案与契合度分析。
+
+## 1. Palantir Object Monitor 能力拆解与关联模型
 
 > 注：Palantir 文档页面显示 `Object Monitors [Sunset]`，因此对标应聚焦“能力与机制”而非界面/名词 1:1 复刻。
 
-### 2.1 核心能力域
+### 1.1 核心能力域
 
 1. **Ontology 域**：Object Type、Link Type、Object Set、属性模型。
 2. **Monitor 定义域**：监控范围、输入（Input）、条件（Condition）、评估（Evaluation）。
@@ -17,13 +18,13 @@
 4. **结果域**：Activity（评估活动）、告警通知（Notifications）、自动动作（Actions）。
 5. **治理域**：权限、配额、审计、限流、失败恢复。
 
-### 2.2 与本项目的映射
+### 1.2 与本项目的映射
 
 - 本体对象状态变化 -> Monitor 输入事件。
 - 持续时长（如高温 1 小时） -> 流式状态机/窗口计算。
 - 命中后 -> 通知 + Action 编排 + 全链路审计。
 
-### 2.3 基于 Palantir 官方文档的精简能力总结（Object Monitors）
+### 1.3 基于 Palantir 官方文档的精简能力总结（Object Monitors）
 
 > 本小节基于官方文档做“能力抽取”，重点关注可对标的实现机制，而非 UI 流程细节。
 
@@ -63,7 +64,7 @@
 - Limits: https://www.palantir.com/docs/foundry/object-monitors/limits/
 - Errors: https://www.palantir.com/docs/foundry/object-monitors/errors/
 
-### 2.4 Automate 中与 Object Monitor 对应能力的实现分析
+### 1.4 Automate 中与 Object Monitor 对应能力的实现分析
 
 > 结论先行：Automate 可视为 Object Monitor 的能力扩展版，且官方明确其为向后兼容替代入口。对标时应“以 Automate 能力上限设计、以 Object Monitor 概念保持语义兼容”。
 
@@ -115,11 +116,11 @@
 ---
 
 
-## 3. Palantir OSv2架构下的Object Monitor方案分析（推断型）
+## 2. Palantir OSv2架构下的Object Monitor方案分析（推断型）
 
 > 说明：公开文档对 OSv2 内部实现细节披露有限。以下为基于常见企业数据平台架构、Palantir 文档语义和工程实践的“高可信推断”，用于设计决策。
 
-### 3.1 问题定义：在 OSv2 链路下，Object Monitor/Automate 到底“跑”在哪里
+### 2.1 问题定义：在 OSv2 链路下，Object Monitor/Automate 到底“跑”在哪里
 
 给定你关注的数据链路：`Datasets -> Object Data Funnel -> (Indexing) -> Object Databases (OSv2/OQL)`，可将 Monitor 能力拆成两条主线：
 
@@ -128,7 +129,7 @@
 
 因此，Object Monitor（以及被 Automate 替代后的同类能力）本质上不是“单独数据库功能”，而是**构建在 Ontology 对象存储与索引层之上的事件驱动评估运行时**。
 
-### 3.2 结合官方语义的分层实现推导（高可信）
+### 2.2 结合官方语义的分层实现推导（高可信）
 
 结合 Ontology 与 Monitor/Automate 官方文档语义，可推导出如下分层：
 
@@ -146,7 +147,7 @@
   - 记录执行轨迹与失败分类；
   - 对并发、队列、重试、吞吐做治理。
 
-### 3.3 关键数据结构推导（实现 Object Monitor 的最小内核）
+### 2.3 关键数据结构推导（实现 Object Monitor 的最小内核）
 
 在 OSv2 架构下，建议把 Monitor 运行时最少抽象为 5 类核心实体：
 
@@ -170,15 +171,15 @@
    - 字段：`effectType(action|notification|logic|function|fallback)`, `idempotencyKey`, `status`。
    - 对应官方 Effects/Fallback。
 
-### 3.4 端到端执行链路（按“对象变化触发”拆解）
+### 2.4 端到端执行链路（按“对象变化触发”拆解）
 
 ```mermaid
 flowchart LR
     A[Dataset 更新] --> B[Object Data Funnel]
     B --> C[Indexing & Object DB Update]
     C --> D[ObjectChangeEvent]
-    D --> E[Monitor Matcher]
-    E --> F[Input Resolver]
+    D --> E[Event Filter]
+    E --> F[Context Builder]
     F --> G[Condition Evaluator]
     G --> H{Matched?}
     H -- No --> I[Write Evaluation/Activity]
@@ -191,10 +192,105 @@ flowchart LR
 **链路解释（与 OSv2 对齐）**
 - `B->C`：对象状态先落在对象数据库/索引，不建议让 Monitor 直接回源 Dataset 做高频 join。
 - `D`：评估触发应该消费“对象变更事件”，而不是表级 CDC 原始事件，降低规则层语义耦合。
-- `F`：Input Resolver 优先读取对象当前快照 + 必要关联对象，必要时读增量上下文。
+- `F`：Context Builder 优先读取对象当前快照 + 必要关联对象，必要时读增量上下文。
 - `L`：fallback 是生产可用性的关键机制（官方 Automate 明确提供）。
 
-### 3.5 时间触发、流式触发、手动执行如何统一
+
+
+### 2.4.1 核心评估模块详解（ObjectChangeEvent -> Filter -> Builder -> Evaluator）
+
+> 你关心的 4 个模块里，真正“把事件变成可判定结果”的是中间两层：`Event Filter` 与 `Context Builder`。前者做**候选规则筛选**，后者做**评估上下文组装**。
+
+#### A) `ObjectChangeEvent`（触发输入）
+
+**职责**
+- 表示“某个对象在某时刻发生了哪些字段变化”，是评估链路的统一触发信封。
+
+**典型输入（事件字段）**
+- `objectType`, `objectId`, `changedFields`, `eventTime`, `sourceWatermark`, `snapshotRef`。
+
+**典型输出**
+- 输出给 `Event Filter` 的是“可路由的对象变更事件”，不做复杂业务判断。
+
+**实现要点**
+- 只承载触发最小信息，不把所有业务上下文都塞进事件。
+- 事件必须带可追溯版本（`snapshotRef/sourceWatermark`），方便补偿与重放。
+
+#### B) `Event Filter`（候选监控匹配器）
+
+**职责（它做什么）**
+- 从“全量 MonitorDefinition”里快速筛出“可能需要评估”的候选监控集合。
+- 核心目标是降本：避免每个事件都跑全量规则。
+
+**输入**
+- `ObjectChangeEvent`
+- Monitor 元数据索引（如 `scope.objectType`、对象集过滤标签、触发字段依赖表）。
+
+**输出**
+- `MatchedMonitorCandidates[]`，每项至少包含：
+  - `monitorId`
+  - `monitorVersion`
+  - `matchReason`（如 objectType 命中、字段依赖命中）
+  - `requiredInputsRef`（后续 Builder 需要拉取哪些输入）
+
+**大体实现逻辑（推荐三段式）**
+1. **类型预过滤**：按 `objectType` 命中规则分桶。
+2. **作用域过滤**：按对象集/租户/业务域进一步过滤。
+3. **字段增量过滤**：若规则只依赖 `temperature`，而事件只改了 `owner`，则可直接跳过。
+
+**常见索引结构**
+- `objectType -> monitorIds`
+- `monitorId -> dependentFields`
+- `monitorId -> scopePredicate`
+
+#### C) `Context Builder`（评估上下文构建器）
+
+**职责（它做什么）**
+- 为每个候选 monitor 组装“可执行的评估上下文”，把“事件 + 快照 + 关联对象”整理成 condition 可消费的输入。
+
+**输入**
+- `ObjectChangeEvent`
+- 单个 `MonitorCandidate`
+- 对象快照读取接口（主对象）
+- 关系查询接口（关联对象/对象集）
+- 可选增量上下文（事件前后值、窗口状态）
+
+**输出**
+- `ResolvedInputContext`，典型字段：
+  - `primaryObjectSnapshot`
+  - `joinedObjects` / `linkedObjects`
+  - `derivedVars`（如近 1h 均值、最近状态）
+  - `dataQualityFlags`（缺字段/类型不符/超时）
+
+**大体实现逻辑（推荐四步）**
+1. **主对象加载**：按 `snapshotRef` 或当前版本读取对象快照。
+2. **输入绑定执行**：按 `inputBindings` 提取字段、关系、聚合值。
+3. **派生变量计算**：计算 condition 需要的中间量（阈值窗口、计数、持续时长状态）。
+4. **质量校验与降级**：标记缺失输入，决定 fail-open / fail-closed / retry。
+
+#### D) `Condition Evaluator`（条件求值器）
+
+**职责**
+- 对 `ResolvedInputContext` 执行 `conditionExpr`，输出 match 与原因。
+
+**输入**
+- `conditionExpr`（可来自 DSL 编译产物）
+- `ResolvedInputContext`
+- 时间语义配置（event-time / processing-time）
+
+**输出**
+- `EvaluationResult`：`match`, `reasonCode`, `explain`, `latencyMs`, `stateTransition`（若状态机规则）。
+
+**实现要点**
+- 表达式求值与状态机求值解耦（无状态规则 vs 有状态规则）。
+- 明确空值、类型转换、乱序事件的判定语义，避免误报漏报。
+
+#### E) 一句话串起来（便于记忆）
+- `Filter` 解决“**谁该算**”（Which monitors）。
+- `Builder` 解决“**拿什么算**”（With what data）。
+- `Evaluator` 解决“**怎么算出结果**”（How to decide）。
+
+### 2.5 时间触发、流式触发、手动执行如何统一
 
 结合 Object Monitor 与 Automate 文档，可推导统一触发模型：
 
@@ -208,7 +304,7 @@ flowchart LR
 
 这样可让评估引擎与 effect 引擎共用调度器，避免多套运行时。
 
-### 3.6 在 OSv2 下实现持续时长/状态机规则的建议
+### 2.6 在 OSv2 下实现持续时长/状态机规则的建议
 
 持续时长规则（例如“温度 > 120 持续 1h”）是 Object Monitor 的难点，建议分层实现：
 
@@ -222,7 +318,7 @@ flowchart LR
    - 严格按事件时间（event-time）做时长计算；
    - 与处理时间（processing-time）分离，减少乱序误报。
 
-### 3.7 一致性与正确性：如何避免误报、漏报、重复动作
+### 2.7 一致性与正确性：如何避免误报、漏报、重复动作
 
 在 `Datasets -> Funnel -> Index -> Runtime` 多段链路下，推荐以下一致性契约：
 
@@ -242,7 +338,7 @@ flowchart LR
 5. **Activity 只追加**
    - 不覆盖历史活动；重算写新记录并关联原始 evaluation。
 
-### 3.8 结合 Limits/Errors 的容量与故障策略推导
+### 2.8 结合 Limits/Errors 的容量与故障策略推导
 
 基于官方提供 limits/errors 文档的事实，可推导生产策略：
 
@@ -255,7 +351,7 @@ flowchart LR
   - `platform throttled`（平台限流）
 - **回退策略**：effect 失败触发 fallback；fallback 失败再落审计与告警。
 
-### 3.9 面向 Ontology 私有化实现的“近似 Palantir”落地蓝图
+### 2.9 面向 Ontology 私有化实现的“近似 Palantir”落地蓝图
 
 如果在自研 Ontology 里复刻该机制，建议组件化为：
 
@@ -273,7 +369,179 @@ flowchart LR
 6. **Operations Plane**：
    - 提供手动执行、重放、队列观察、失败重驱、容量看板。
 
-### 3.10 可信度分层（避免过度推断）
+
+
+### 2.9.1 `Monitor Compiler` 详细说明（核心控制面）
+
+`Monitor Compiler` 不是“代码编译器”意义上的字节码编译器，而是**规则发布时的语义编排器**：把人可读 DSL/配置，转换成运行时可高效执行、可治理、可回滚的执行计划。
+
+#### 1) 为什么必须有 Compiler
+
+如果没有 Compiler，评估引擎每次触发都要临时解析 DSL、临时推断依赖字段、临时决定执行策略，会导致：
+- 延迟抖动大（解析开销落在热路径）；
+- 运行时错误多（类型/语义问题晚发现）；
+- 难治理（无法提前算出配额风险与依赖影响）。
+
+Compiler 的价值就是把这些工作前移到发布阶段。
+
+#### 2) 输入 / 输出
+
+**输入（Authoring 侧）**
+- `Monitor DSL`：scope / inputs / condition / effects / execution policy。
+- `Ontology Schema`：对象类型、属性类型、关系定义。
+- `Platform Policy`：租户配额、安全策略、限流模板。
+
+**输出（Runtime 侧）**
+- `ExecutablePlan`（版本化）：
+  - `ScopePlan`：可匹配对象范围（可索引化）。
+  - `InputPlan`：输入绑定执行图（读取顺序、依赖、缓存策略）。
+  - `ConditionPlan`：已类型检查并归一化的表达式 AST/IR。
+  - `EffectPlan`：effect DAG、重试/fallback/idempotency 配置。
+  - `ExecutionPlan`：触发模式、并发池、超时、重放策略。
+
+#### 3) 编译流水线（推荐 8 阶段）
+
+1. **Parse**：DSL 解析为 AST。
+2. **Semantic Check**：字段存在性、类型匹配、关系路径合法性检查。
+3. **Normalize**：表达式标准化（常量折叠、逻辑归一）。
+4. **Dependency Extract**：提取依赖字段/关系，产出 `dependentFields` 供 Filter 建索引。
+5. **Plan Build**：生成 Input/Condition/Effect 子计划。
+6. **Policy Inject**：注入平台默认策略（超时、重试上限、审计字段）。
+7. **Static Risk Analyze**：预估 fanout、读取成本、队列压力，超阈值阻断发布。
+8. **Version & Publish**：生成 `monitorVersion`，原子发布到配置存储与缓存。
+
+#### 4) 与运行时模块的关系
+
+- 给 `Event Filter`：输出 `scope + dependentFields`，让匹配变成索引查询。
+- 给 `Context Builder`：输出 `InputPlan`，让取数逻辑标准化、可缓存。
+- 给 `Condition Evaluator`：输出 `ConditionPlan(AST/IR)`，避免热路径重复解析。
+- 给 `Effect Orchestrator`：输出 `EffectPlan`（幂等键策略、fallback DAG）。
+
+#### 5) 失败与回滚机制（生产必需）
+
+- **编译失败**：阻断发布，返回明确错误（类型错误/权限错误/配额超限）。
+- **灰度发布**：新版本先小流量运行，活动记录打 `version` 标记。
+- **快速回滚**：控制面切换 `activeVersion`，运行时无感回退到旧 plan。
+
+#### 6) 最小产物示例（抽象）
+
+```yaml
+monitorId: high_temp_1h
+version: 12
+scopePlan:
+  objectType: Equipment
+  dependentFields: [temperature, status]
+inputPlan:
+  reads:
+    - primary: Equipment.temperature
+    - linked: Line.shiftConfig
+conditionPlan:
+  type: stateful_duration
+  expr: temperature > 120 for 1h
+effectPlan:
+  onMatch:
+    - type: notification
+    - type: action
+      retry: {max: 3, backoff: exp}
+      fallback: {type: notification}
+executionPlan:
+  trigger: [event, time]
+  concurrencyPool: monitor_high_priority
+```
+
+#### 7) 一句话定义
+
+- `Monitor Compiler` = **把“规则定义”变成“可索引、可执行、可治理、可回滚”的版本化执行计划系统**。
+
+
+
+### 2.9.2 两条链路的关系：执行链路 vs 组件蓝图
+
+你提到的两条描述其实是**同一系统的两个视角**：
+
+- **3.4 执行链路**（`ObjectChangeEvent -> Event Filter -> Context Builder -> Condition Evaluator`）是“**单次评估请求在数据面如何流转**”。
+- **3.9 落地蓝图**（`Object Change Bus / Monitor Compiler / Evaluation Engine / Effect Orchestrator`）是“**系统按组件如何部署与分工**”。
+
+二者是一一映射关系，而不是两套互斥架构。
+
+#### A) 映射表（最关键）
+
+1. `ObjectChangeEvent`（3.4）
+   - 对应蓝图中的 `Object Change Bus`（3.9）作为事件承载与分发层。
+
+2. `Event Filter + Context Builder + Condition Evaluator`（3.4）
+   - 共同收敛到蓝图中的 `Evaluation Engine`（3.9）。
+   - 可理解为：Evaluation Engine 的内部流水线就是 Filter -> Builder -> Evaluator。
+
+3. `Effect Planner / Execute Action`（3.4）
+   - 对应蓝图中的 `Effect Orchestrator`（3.9）。
+
+4. 3.4 中没有显式出现但 3.9 有的 `Monitor Compiler`
+   - 它是**控制面**组件，发生在“规则发布时”，不在单次事件热路径里。
+   - Compiler 产出的 `Scope/Input/Condition/Effect/Execution Plan` 会被 3.4 热路径消费。
+
+#### B) 一句话理解
+
+- **3.4** 讲的是“请求怎么跑”。
+- **3.9** 讲的是“模块怎么搭”。
+- 二者关系可写成：
+  - `Object Change Bus -> Evaluation Engine(Filter+Builder+Evaluator) -> Effect Orchestrator -> Activity/Audit`。
+
+### 2.9.3 Evaluation Engine 与 Effect Orchestrator 的关系与边界
+
+#### 1) 关系定义
+
+- `Evaluation Engine`：负责“算”，即触发、取数、条件判定、输出命中结果。
+- `Effect Orchestrator`：负责“做”，即动作编排、重试、幂等、fallback、限流、补偿。
+
+它们是“判定平面”和“执行平面”的解耦关系：
+- 前者强调正确性与规则语义；
+- 后者强调外部副作用的可靠交付。
+
+#### 2) 是否必须有 Effect Orchestrator？
+
+**结论**：生产级场景建议“需要独立存在”；MVP 小规模场景可暂时合并。
+
+- **建议独立（默认）**的原因：
+  1. 动作通常涉及外部系统（Webhook/工单/函数），失败率和延迟分布与评估计算完全不同。
+  2. 需要独立重试、死信队列、限流、熔断、fallback；这些能力若塞进 Evaluation Engine，会让评估热路径变重。
+  3. 审计口径不同：评估成功 != 动作成功，独立模块更容易做可观测与责任边界。
+
+- **可不独立（例外）**的条件：
+  1. 只有极少动作类型（例如单一内部 RPC）；
+  2. QPS 低、无严格 SLO；
+  3. 可接受失败后人工补偿；
+  4. 暂不要求复杂 fallback / 多级重试策略。
+
+#### 3) “Evaluation Engine 直接 REST 触发 Action”可不可行？
+
+**可行，但仅建议用于早期 PoC/MVP。**
+
+- **优点**：实现快、链路短、部署简单。
+- **主要风险**：
+  1. 外部接口抖动会直接反压评估链路，导致评估延迟上升；
+  2. 幂等与重试逻辑散落在评估服务内，复杂度快速膨胀；
+  3. 难以做 effect 级隔离（不同动作优先级/限流策略无法独立治理）；
+  4. 出现“重复触发”或“部分成功”时排障困难。
+
+#### 4) 推荐演进路径（务实）
+
+- **Phase 1（MVP）**：Evaluation Engine 直调 Action（REST），但强制补齐最小护栏：
+  - `idempotencyKey`、超时、有限重试、失败审计。
+- **Phase 2（生产）**：拆出 Effect Orchestrator，改为异步消息驱动：
+  - Evaluation 只产出 `EffectCommand`；
+  - Orchestrator 负责执行、重试、fallback、DLQ、重驱。
+- **Phase 3（规模化）**：按 effect 类型分池与策略模板化（通知/函数/外部工单分别治理）。
+
+#### 5) 设计判定标准（何时必须拆分）
+
+满足任一条，建议立即独立 `Effect Orchestrator`：
+- 外部动作失败率或超时率不可忽略；
+- 单次命中触发多个动作（fanout > 1）；
+- 需要 fallback/补偿链路；
+- 需要按租户/动作类型做独立限流与配额。
+
+### 2.10 可信度分层（避免过度推断）
 
 - **高可信（官方直接表达）**
   - Object Monitor 处于 sunset，Automate 为向后兼容替代。
@@ -288,7 +556,7 @@ flowchart LR
   - 内部 topic/状态存储结构、具体调度器实现、分片策略等。
   - 这些需要通过 PoC 压测与行为实验进一步校准。
 
-### 3.11 参考链接（Ontology + Object Monitor + Automate）
+### 2.11 参考链接（Ontology + Object Monitor + Automate）
 
 **Ontology（公开入口）**
 - Overview: https://www.palantir.com/docs/foundry/ontology/overview/
@@ -310,15 +578,15 @@ flowchart LR
 > 说明：Ontology 下部分 OSv2/OQL/Object Data Funnel 细节页面在公开站点可能存在路径调整或访问限制；本节对这些内部实现采用“公开语义 + 工程推导”的方式给出近似实现方案。
 
 
-## 4. 竞品全景调研（产品/平台/开源）
+## 3. 竞品全景调研（产品/平台/开源）
 
 本节按“可直接对标”与“组合对标”分类，强调与 Object Monitor 的关联关系。
 
-## 4.1 企业产品（可直接采购或深度集成）
+## 3.1 企业产品（可直接采购或深度集成）
 
 > 本节对每款产品都给出：定位、关键组件、与 Object Monitor 的映射、集成方式、局限性，并附逻辑视图。
 
-### 4.1.1 ServiceNow Event Management + CMDB
+### 3.1.1 ServiceNow Event Management + CMDB
 
 **产品定位**
 - ServiceNow 以 CMDB（配置项/CI）为对象中心，Event Management 负责事件归并、告警生成与工单闭环。
@@ -355,7 +623,7 @@ flowchart LR
 
 ---
 
-### 4.1.2 Datadog Monitors + Workflow Automation
+### 3.1.2 Datadog Monitors + Workflow Automation
 
 **产品定位**
 - Datadog 强于可观测数据聚合、监控规则、异常检测和通知编排。
@@ -388,7 +656,7 @@ flowchart LR
 
 ---
 
-### 4.1.3 Splunk ITSI / ES
+### 3.1.3 Splunk ITSI / ES
 
 **产品定位**
 - 强项是事件关联、风险评分、SOC 分析与调查闭环。
@@ -421,7 +689,7 @@ flowchart LR
 
 ---
 
-### 4.1.4 Dynatrace（Davis AI + Automation）
+### 3.1.4 Dynatrace（Davis AI + Automation）
 
 **产品定位**
 - 以应用拓扑和性能根因为主，适合技术栈异常诊断。
@@ -452,7 +720,7 @@ flowchart LR
 
 ---
 
-### 4.1.5 Elastic Watcher / Kibana Alerting
+### 3.1.5 Elastic Watcher / Kibana Alerting
 
 **产品定位**
 - 面向查询型告警：基于索引和 DSL 查询进行条件评估。
@@ -483,7 +751,7 @@ flowchart LR
 
 ---
 
-### 4.1.6 云厂商告警（AWS/Azure/GCP）
+### 3.1.6 云厂商告警（AWS/Azure/GCP）
 
 **产品定位**
 - 托管监控告警与自动化触发能力成熟，适合云原生体系。
@@ -512,7 +780,7 @@ flowchart LR
 
 ---
 
-### 4.1.7 Cognite Data Fusion (CDF)
+### 3.1.7 Cognite Data Fusion (CDF)
 
 **产品定位**
 - CDF 是工业数据平台，核心能力是把 OT/IT 数据进行上下文建模（Contextualization）、时间序列管理、关系建模、工作流与事件自动化。
@@ -601,7 +869,7 @@ flowchart TB
 
 ---
 
-### 4.1.8 Azure Digital Twins (ADT)
+### 3.1.8 Azure Digital Twins (ADT)
 
 **产品定位**
 - ADT 提供数字孪生图模型（DTDL）、关系建模与基于事件路由的数字孪生状态处理。
@@ -636,7 +904,7 @@ flowchart LR
 
 ---
 
-### 4.1.9 多产品组合成“Object Monitor 对标方案”的整体逻辑视图
+### 3.1.9 多产品组合成“Object Monitor 对标方案”的整体逻辑视图
 
 > 组合思路：本体平台负责对象语义与规则引擎，企业产品负责下游动作闭环与安全运营。
 
@@ -685,7 +953,7 @@ flowchart TB
 - 核心平台保持“对象语义 + 规则执行 + 审计”主权；
 - 外部产品按长板接入，避免把核心对象语义分散到多个产品。
 
-## 4.2 开源组合方案（扩展，超出此前两种）
+## 3.2 开源组合方案（扩展，超出此前两种）
 
 > 本节每套方案都给出 Mermaid 逻辑图、关键交互与可行性判断。
 
@@ -861,7 +1129,7 @@ flowchart LR
 
 ---
 
-### 4.2.7 开源方案对比结论
+### 3.2.7 开源方案对比结论
 
 - **首选**：方案 A（能力完整与工程可控性平衡最佳）。
 - **成本敏感 MVP**：方案 D。
@@ -869,3 +1137,315 @@ flowchart LR
 - **超大规模长期路线**：方案 F（需强平台团队）。
 
 ---
+
+## 4. Palantir Object Monitor 功能模块拆解与业界实现方案（新增）
+
+> 目标：回答“Object Monitor 由哪些核心模块构成，以及每个模块在业界可怎么实现、有哪些开源选项”。本节按**能力模块**而非产品 UI 来拆解，便于直接指导架构选型。
+
+### 4.1 总体模块分解（从触发到闭环）
+
+结合 Object Monitor / Automate 公开语义，可将系统拆为 8 个核心模块：
+
+1. **变更捕获与触发模块（Change Capture / Triggering）**
+2. **规则路由与候选匹配模块（Event Filter）**
+3. **输入解析与上下文组装模块（Context Builder）**
+4. **规则评估模块（Condition Evaluator）**
+5. **动作编排与执行模块（Effect Orchestrator）**
+6. **审计活动与可观测模块（Activity/Audit/Observability）**
+7. **规则发布与版本管理模块（Monitor Compiler + Control Plane）**
+8. **治理与可靠性模块（Quota/Rate Limit/Retry/Fallback）**
+
+---
+
+### 4.2 各模块：职责 + 常见实现方案 + 开源软件
+
+### 4.2.1 变更捕获与触发模块
+
+**核心职责**
+- 捕获对象状态变化（对象新增、属性更新、关系变化）。
+- 生成标准化触发事件（`ObjectChangeEvent`）。
+- 支持 event/time/manual 三类触发入口。
+
+**业界实现方案**
+- **CDC 驱动**：从 MySQL/Postgres/Oracle binlog 捕获变更，再转对象事件。
+- **事件溯源驱动**：业务系统直接产生领域事件，避免 CDC 语义二次转换。
+- **双轨触发**：事件触发 + 定时补偿触发（防漏评估）。
+
+**典型开源软件**
+- CDC：Debezium、Canal、Maxwell。
+- 消息总线：Kafka、Pulsar、Redpanda。
+- 定时调度：Airflow、Argo Workflows、Temporal Schedules。
+
+**选型建议**
+- 对象更新量大、异构库多：优先 `Debezium + Kafka`。
+- 强一致业务事件已完备：优先领域事件直发，CDC 仅兜底。
+
+### 4.2.2 规则路由与候选匹配模块（Event Filter）
+
+**核心职责**
+- 根据对象类型、对象范围、依赖字段，快速筛选“需要被评估的规则”。
+- 把全量规则匹配问题降维为索引查询问题。
+
+**业界实现方案**
+- **倒排索引匹配**：`objectType -> monitors`，`field -> monitors`。
+- **规则分片匹配**：按租户/对象类型做规则分区，减少扫描面。
+- **预编译依赖图**：发布期提取 `dependentFields`，运行期 O(1) 路由。
+
+**典型开源软件/技术**
+- 索引与检索：Elasticsearch、OpenSearch、Redis Set/Bitmap。
+- 高速 KV：Redis、RocksDB。
+- 规则匹配引擎（可借鉴）：Drools（Rete 思想）、json-rules-engine。
+
+**选型建议**
+- 规则数 > 10k 时，不建议线性扫描；必须做依赖字段索引与分桶。
+
+### 4.2.3 输入解析与上下文组装模块（Context Builder）
+
+**核心职责**
+- 将事件补全为可评估上下文：主对象快照、关联对象、窗口统计、派生变量。
+- 做输入质量检查与降级策略（缺值、超时、类型异常）。
+
+**业界实现方案**
+- **在线查询组装**：运行时拉主对象 + 关联对象（低延迟但对存储压力大）。
+- **预聚合视图组装**：提前计算特征（高吞吐、低延迟、但链路更复杂）。
+- **混合策略**：热点字段预聚合，长尾字段按需查询。
+
+**典型开源软件**
+- 对象/文档存储：PostgreSQL、MongoDB。
+- 关系查询/图库：Neo4j、JanusGraph。
+- 特征与预聚合：Flink SQL、Spark Structured Streaming、Materialize、ClickHouse。
+- 缓存：Redis。
+
+**选型建议**
+- 低延迟优先：`Redis + 预聚合特征`；
+- 关系规则密集：引入图存储（Neo4j/JanusGraph）辅助 Context Builder。
+
+### 4.2.4 规则评估模块（Condition Evaluator）
+
+**核心职责**
+- 执行阈值、关系、时序、持续时长等规则。
+- 产出 `match/no-match + explain`，并支持状态机规则。
+
+**业界实现方案**
+- **无状态表达式引擎**：用于阈值/布尔组合规则。
+- **有状态流计算引擎**：用于持续时长、窗口、乱序处理。
+- **CEP 模式**：处理复杂事件模式与多事件序列检测。
+
+**典型开源软件**
+- 规则引擎：Drools、OpenL Tablets、easy-rules。
+- 流处理/状态：Flink、Kafka Streams、Spark Structured Streaming。
+- CEP：Flink CEP、Esper。
+
+**选型建议**
+- 有“持续 1h”“连续 N 次”这类规则时，建议 Flink/Kafka Streams 承担状态计算。
+
+### 4.2.5 动作编排与执行模块（Effect Orchestrator）
+
+**核心职责**
+- 将命中结果转成可执行动作：通知、函数、外部 API、工单系统。
+- 保障幂等、重试、限流、fallback、超时与补偿。
+
+**业界实现方案**
+- **消息驱动执行**：评估与动作异步解耦，提升吞吐与隔离性。
+- **工作流驱动执行**：显式建模重试/fallback/人工审批。
+- **策略驱动执行**：按 effect 类型配置不同可靠性策略。
+
+**典型开源软件**
+- 工作流编排：Temporal、Camunda、Netflix Conductor。
+- 任务队列：Celery、RabbitMQ、Kafka。
+- HTTP 重试/断路器组件：Resilience4j（JVM）。
+
+**选型建议**
+- 需要复杂重试与人工介入：优先 Temporal/Camunda。
+
+### 4.2.6 审计活动与可观测模块（Activity/Audit）
+
+**核心职责**
+- 持久化 evaluation/activity 全链路记录。
+- 提供“为什么触发/为什么没触发”的可解释能力。
+- 支持排障、审计、重放追踪。
+
+**业界实现方案**
+- **Append-only 活动日志**：不可变审计，天然支持追溯。
+- **指标 + 日志 + Trace 三位一体观测**。
+- **可回放审计**：按 event/watermark/revision 重放。
+
+**典型开源软件**
+- 日志/检索：OpenSearch、Elasticsearch、Loki。
+- 指标：Prometheus + Grafana。
+- 分布式追踪：OpenTelemetry + Jaeger/Tempo。
+- 审计存储：PostgreSQL/ClickHouse/Iceberg（按规模选择）。
+
+### 4.2.7 规则发布与版本管理模块（Monitor Compiler + Control Plane）
+
+**核心职责**
+- 将 DSL 转为 `ExecutablePlan`（scope/input/condition/effect/execution）。
+- 负责静态校验、依赖提取、风险评估、版本发布、灰度与回滚。
+
+**业界实现方案**
+- **编译前置**：把语义检查与优化前移到发布时。
+- **版本化发布**：双版本并存，按流量灰度切换。
+- **策略注入**：平台默认超时/重试/配额在编译期注入。
+
+**典型开源软件/可复用组件**
+- DSL/解析：ANTLR、Lark、Tree-sitter。
+- 配置版本管理：GitOps（ArgoCD/Flux）、Open Policy Agent（策略校验）。
+- 规则平台借鉴：OpenFeature（特性开关治理思想）。
+
+### 4.2.8 治理与可靠性模块
+
+**核心职责**
+- 租户隔离、配额控制、限流熔断、失败分级、重试与补偿。
+- 保证在高峰和故障下“可控降级，不雪崩”。
+
+**业界实现方案**
+- **多队列隔离**：重规则与轻规则分池。
+- **失败分类处理**：输入失败/评估失败/执行失败分通道治理。
+- **回放补偿机制**：基于 watermark + checkpoint 做可控重算。
+
+**典型开源软件**
+- 限流与策略：Envoy、NGINX、Kong、Sentinel。
+- 弹性伸缩：KEDA、HPA。
+- 状态与 checkpoint：Flink state backend / Kafka offsets / RocksDB。
+
+---
+
+### 4.3 模块与开源组合的推荐参考架构（3 套）
+
+1. **通用企业方案（平衡型）**
+- `Debezium + Kafka + Flink + Redis + Temporal + OpenSearch + Prometheus`。
+- 适合多数“对象监控 + 动作闭环”场景。
+
+2. **成本优先 MVP（轻量型）**
+- `PostgreSQL CDC + Kafka + Kafka Streams + Celery + Grafana`。
+- 适合快速验证规则语义与业务闭环。
+
+3. **关系密集场景（图规则优先）**
+- `Kafka + Flink + Neo4j/JanusGraph + Temporal + ClickHouse`。
+- 适合供应链/反欺诈/复杂拓扑联动。
+
+---
+
+### 4.4 结论：Palantir Object Monitor 的“可复刻模块清单”
+
+若要在自研 Ontology 中实现“近似 Palantir 能力”，最小可用模块组合建议为：
+- `Change Capture`（事件入口）
+- `Filter + Builder + Evaluator`（规则核心链路）
+- `Effect Orchestrator`（动作闭环）
+- `Activity/Audit`（可观测与审计）
+- `Monitor Compiler`（规则控制面）
+- `Reliability Governance`（生产可用性）
+
+该拆分既能对应 Palantir 的概念语义，也便于映射到开源生态实施。
+
+
+## 5. 四大核心模块的业界方案与开源软件对比（Object Change Bus / Monitor Compiler / Evaluation Engine / Effect Orchestrator）
+
+> 本节仅围绕我们已收敛的四个核心模块，逐项给出：可选实现路径、代表性开源软件、优劣势与对 Ontology Object Monitor 的契合度判断。
+
+### 5.1 模块一：Object Change Bus（对象变更总线）
+
+**目标能力**
+- 承接对象变更事件（属性/关系变化）并可靠分发给评估引擎。
+- 提供顺序性（至少分区内）、可重放、消费位点、积压治理。
+
+**业界主流实现路径**
+1. `CDC -> MQ`：从数据库 binlog 抓变更后写总线。
+2. `Domain Event -> MQ`：业务系统直接发对象事件。
+3. `CDC + Domain Event` 混合：事件优先，CDC 做补偿与核对。
+
+**开源软件候选与契合度**
+
+| 方案 | 典型组件 | 优势 | 风险/代价 | 契合度 |
+|---|---|---|---|---|
+| 方案 A | Debezium + Kafka | 生态成熟、可重放强、与 Flink/KStreams 集成好 | CDC 映射对象语义需二次加工 | 高 |
+| 方案 B | Canal/Maxwell + Kafka/RocketMQ | 上手快、国内资料多 | 语义一致性与多库治理能力弱于 Debezium 体系 | 中 |
+| 方案 C | Pulsar + Debezium/Pulsar IO | 多租户隔离与分层存储能力好 | 团队学习曲线较高 | 中高 |
+| 方案 D | Redpanda（Kafka API） | 运维轻量、单二进制部署 | 生态深度与最佳实践略少 | 中 |
+
+**建议**
+- 若目标是快速进入生产可用：优先 `Debezium + Kafka`。
+- 若已有强业务事件体系：采用 `Domain Event + Kafka`，CDC 做兜底核对。
+
+### 5.2 模块二：Monitor Compiler（规则编译控制面）
+
+**目标能力**
+- 将规则 DSL 转为 `ExecutablePlan`（scope/input/condition/effect/execution）。
+- 在发布期完成校验、依赖提取、风险分析、版本发布与回滚。
+
+**业界主流实现路径**
+1. 自研 DSL 编译器（AST/IR）+ 配置中心版本化发布。
+2. 基于规则引擎语法（如 Drools DRL）做适配层。
+3. 低代码规则配置 + 编译生成执行计划。
+
+**开源软件候选与契合度**
+
+| 方案 | 典型组件 | 优势 | 风险/代价 | 契合度 |
+|---|---|---|---|---|
+| 方案 A | ANTLR/Lark + 自研 Compiler + GitOps(ArgoCD/Flux) | 可完全贴合对象语义；可做静态优化与版本治理 | 前期研发投入高 | 高 |
+| 方案 B | Drools(KIE) 直用/轻改 | 规则引擎成熟、推理能力强 | 与对象关系/时序语义耦合适配复杂 | 中 |
+| 方案 C | OPA(Rego) 承担部分策略校验 + 自研编译 | 策略与合规治理清晰 | Rego 不适合承载全部业务规则执行计划 | 中高（作为辅件） |
+| 方案 D | JsonLogic/json-rules-engine + 自研发布流程 | 轻量、上手快 | 大规模复杂规则可维护性不足 | 中低 |
+
+**建议**
+- 该模块更适合“自研主导 + 开源组件拼装”：`ANTLR/Lark + 自研编译流水线 + GitOps/OPA`。
+
+### 5.3 模块三：Evaluation Engine（Event Filter + Context Builder + Condition Evaluator）
+
+**目标能力**
+- Event Filter：从全量规则中筛出候选规则。
+- Context Builder：组装评估所需上下文（主对象、关联对象、派生变量）。
+- Condition Evaluator：执行阈值/状态机/时序规则并产出命中结果。
+
+**业界主流实现路径**
+1. `流处理引擎主导`：Flink/Kafka Streams 承担过滤、状态和评估。
+2. `规则引擎主导`：Drools/Esper 做规则匹配，外部服务补上下文。
+3. `混合型`：Filter/Builder 在流引擎，Evaluator 在规则引擎或表达式引擎。
+
+**开源软件候选与契合度**
+
+| 子模块 | 候选软件 | 优势 | 风险/代价 | 契合度 |
+|---|---|---|---|---|
+| Event Filter | Flink/Kafka Streams + Redis/ES 索引 | 高吞吐、可并行、依赖索引可前置 | 需要较强流计算工程能力 | 高 |
+| Context Builder | Redis + OLTP/Graph(Neo4j/JanusGraph) + Flink SQL/ClickHouse 特征 | 兼顾低延迟和复杂关联查询 | 架构复杂度较高 | 高 |
+| Condition Evaluator（无状态） | CEL/MVEL/JsonLogic/easy-rules | 轻量易扩展 | 复杂时序能力有限 | 中高 |
+| Condition Evaluator（有状态） | Flink CEP / Kafka Streams state store / Esper | 强时序与持续时长能力 | 状态管理与调优门槛高 | 高 |
+
+**建议**
+- 若有“持续 1h/乱序补偿/窗口状态”硬需求，优先 `Flink` 作为 Evaluation Engine 主体。
+- 规则表达层可采用“表达式引擎 + 状态算子”分层，避免全量绑定单一规则框架。
+
+### 5.4 模块四：Effect Orchestrator（动作编排执行）
+
+**目标能力**
+- 将命中结果可靠执行为通知/动作/函数调用。
+- 提供幂等、重试、超时、回退（fallback）、死信、重驱、审计。
+
+**业界主流实现路径**
+1. `异步命令执行`：Evaluation 产出 EffectCommand，Orchestrator 消费执行。
+2. `工作流编排执行`：用工作流引擎建模复杂重试与人工节点。
+3. `同步直调`：Evaluation 直接 REST 调动作端（仅适合 MVP）。
+
+**开源软件候选与契合度**
+
+| 方案 | 典型组件 | 优势 | 风险/代价 | 契合度 |
+|---|---|---|---|---|
+| 方案 A | Temporal + Kafka + DLQ | 编排/重试/补偿能力强，审计清晰 | 学习与建模成本较高 | 高 |
+| 方案 B | Camunda/Conductor + MQ | BPM 与人工审批场景好 | 平台治理复杂度偏高 | 中高 |
+| 方案 C | Celery/RQ + Redis/RabbitMQ | 轻量、MVP 快 | 大规模可靠交付与可观测能力弱 | 中 |
+| 方案 D | Evaluation 直调 REST | 实现最简单 | 易反压评估链路，重试幂等难治理 | 低（生产）/中（PoC） |
+
+**建议**
+- 生产建议保留独立 Orchestrator；
+- 可采用“两阶段演进”：MVP 直调 REST -> 生产切换异步 Orchestrator。
+
+### 5.5 四模块组合的契合度结论（面向本项目）
+
+从“可落地 + 可演进 + 可治理”综合看，推荐优先路线：
+
+1. **Object Change Bus**：`Debezium + Kafka`（或 Domain Event + Kafka，CDC 兜底）。
+2. **Monitor Compiler**：`ANTLR/Lark + 自研 Compiler + GitOps/OPA 辅助治理`。
+3. **Evaluation Engine**：`Flink` 主体（内含 Event Filter/Context Builder/Condition Evaluator 分层）。
+4. **Effect Orchestrator**：`Temporal + MQ`（MVP 可短期直调，尽快拆分）。
+
+该路线与我们已定义的四大模块一致，且在业界开源生态中可获得较好的成熟度与可维护性平衡。
