@@ -435,6 +435,62 @@ Action Gateway 或目标系统需保证同 key 幂等。
    - 落地 `object_change_raw -> normalize/dedupe -> object_change`，覆盖 Outbox+CDC 双发去重。
    - 出口：重复事件不造成重复评估，版本回退进入 reconcile 队列。
 
+### 10.1.1 为什么当前先实现 InMemory 版本（工程决策说明）
+
+W2 代码实现中先提供 `InMemoryMonitorReleaseService` 与内存态 `ChangeNormalizer`，这是 **刻意的阶段化实现**，不是最终生产形态，核心原因如下：
+
+1. **契约先行，降低返工风险**
+   - W2 的首要目标是冻结发布链路契约与归一化语义（版本切换、回滚元数据、去重键、版本回退分流）。
+   - 在契约未稳定前直接绑定 MySQL/Kafka/Redis，会把“语义问题”混入“基础设施问题”，导致排障与迭代成本显著增加。
+
+2. **验证语义正确性优先于基础设施完备性**
+   - Phase 1 里程碑要求先验证“重复事件不重复评估、回退进 reconcile”，这是业务语义正确性问题。
+   - InMemory 形态能在单元测试中快速覆盖双发去重/版本回退等边界场景，缩短反馈回路。
+
+3. **与实施节奏一致（W2 -> W3/W4）**
+   - W2 关注发布链路和归一化；W3/W4 才会引入 KV 物化、求值与 ledger。
+   - 若 W2 过早重投入持久化与消息中间件，会挤占后续主链路开发与联调窗口。
+
+4. **为后续“实现替换不改接口”做铺垫**
+   - 当前实现通过清晰的数据契约与服务边界，保证后续从 InMemory 切换到持久化/流式实现时，上层调用方最小改动。
+
+### 10.1.2 后续生产化的正常实现路径（从 InMemory 到可上线）
+
+生产化不应推翻现有 W2 语义，而应按“同契约替换实现”推进：
+
+1. **发布链路（Release Service）生产化**
+   - 存储层：将 monitor definition/artifact/version metadata 落到 MySQL（建议表：`monitor_definition`、`monitor_artifact`、`monitor_release_log`）。
+   - 并发控制：发布/回滚引入乐观锁（`version` 字段）或事务锁，避免并发发布导致双 active。
+   - 命令一致性：发布命令写入 `command_outbox`，由异步分发器推送 runtime loader，形成“写库成功 -> 命令分发 -> ACK 生效”的闭环。
+   - 审计增强：落 `operator`、`command_id`、`plan_hash`、`rollback_from_version`、`effective_time`，满足审计与追溯。
+
+2. **变更归一化（Normalizer）生产化**
+   - 输入总线：消费 `object_change_raw`（Outbox + Neo4j CDC 汇流）。
+   - 去重状态：将短窗口去重状态下沉到可恢复状态存储（Kafka Streams state store / Redis / Flink keyed state），支持进程重启不丢窗口语义。
+   - 输出分流：
+     - 正常事件 -> `object_change`；
+     - 版本回退/异常 -> `reconcile_queue`。
+   - 质量指标：暴露 dedupe rate、reconcile rate、source lag（outbox vs cdc）等指标。
+
+3. **故障与恢复机制补齐**
+   - 语义模型：至少一次消费 + 幂等写入；
+   - 失败重试：normalize 处理失败进入 retry topic，超阈值告警；
+   - 冷启动恢复：加载最近去重窗口状态与对象最新版本水位，避免重启后重复触发。
+
+4. **与 W3/W4 的接口衔接**
+   - `object_change` 作为 Event Filter 唯一输入，避免后续链路直接读 raw topic；
+   - `reconcile_queue` 提供给补偿 worker 与回放流程；
+   - 发布链路与 artifact loader 对接，保证规则版本切换在 evaluator 侧有明确生效点。
+
+### 10.1.3 生产化完成判定（W2 Exit+）
+
+当满足以下条件，可认为 W2 从“开发态 InMemory”进入“可上线态实现”：
+
+1. 发布 API 与 runtime 生效点可追踪（command_id 全链路可查）。
+2. 双发事件去重在重启/故障后仍保持语义一致（无重复评估放大）。
+3. 版本回退事件稳定进入 reconcile 队列，并具备处理 SLA 与告警。
+4. 灰度期间 dedupe/reconcile 指标可观测，并纳入回滚门禁。
+
 3. **W3：Context Builder + Event Filter**
    - 完成主对象 + 一跳关系物化入 KV。
    - 完成 `objectType + changed_fields + scope` 两层过滤与 artifact 热加载。
@@ -652,3 +708,122 @@ graph TD
 3. 何时触发 Java 迁移以及兼容策略（灰度/双写/回放校验）。
 
 ---
+
+
+## 16. 当前代码实现与 Phase 1 设计对照（复核结论）
+
+> 目的：基于当前 `ontology/object_monitor` 代码状态，逐章对照本设计文档，明确“已实现 / 部分实现 / 未实现”边界，避免将 MVP 误判为上线完成态。
+
+### 16.1 对照范围与结论摘要
+
+1. **已实现（MVP）**：W1~W8 的主链路语义已具备可测试实现（DSL/发布/归一化/物化/过滤/L1求值/动作重试与DLQ/灰度门禁评估）。
+2. **部分实现**：P0 已补齐版本对齐 + reconcile 分流、Action API HTTP 适配器、SQLite 持久化选项，但默认运行形态仍以内存实现为主。
+3. **未实现（上线关键）**：真实 Kafka 流水线、MySQL 正式表结构与索引策略、控制面 RBAC/配额、全链路指标与运维工具化仍缺失。
+
+### 16.2 按章节对照清单（设计 -> 现状）
+
+#### A. 5.1 Monitor API + DSL Compiler
+
+- **已实现**
+  - DSL 最小子集解析与校验（比较、布尔、in-list、startsWith、字段白名单、复杂度门禁）。
+  - artifact 生成（`plan_hash`、`field_projection`、`predicate_ast`、`action_template`）。
+- **未实现/待补**
+  1. Schema Registry 的真实在线校验（当前为传入字段集合）。
+  2. 发布前配额/复杂度审计落库与审批流程。
+
+#### B. 5.2 Context Builder Worker（复制模式）
+
+- **已实现**
+  - 主对象 + 一跳关系字段扁平化（`owner_name` 形态）。
+  - KV 快照键模型 `tenant:objectType:objectId`。
+- **未实现/待补**
+  1. 对接真实 Tx Log/CDC 消费入口。
+  2. `context_build_retry` 重试队列及阈值告警。
+
+#### C. 5.3 Event Filter
+
+- **已实现**
+  - `objectType + changed_fields + scope` 两层过滤逻辑。
+- **未实现/待补**
+  1. `field_to_monitors` 倒排索引结构（当前仍是 specs 线性扫描）。
+  2. artifact 增量热更新机制（当前是全量替换）。
+
+#### D. 5.4 L1 Evaluator
+
+- **已实现**
+  - L1 无状态求值。
+  - 幂等写入键：`tenantId:monitorId:objectId:sourceVersion`。
+  - 版本一致性护栏：快照缺失/版本落后进入 reconcile。
+- **未实现/待补**
+  1. reason 编码规范化（当前仍偏字符串描述）。
+  2. 更完整表达式引擎（空值语义、类型提升策略）。
+
+#### E. 5.5 Activity Writer
+
+- **已实现**
+  - `monitor_evaluation` / `monitor_activity` / `action_delivery_log` 的内存与 SQLite 版本。
+- **未实现/待补**
+  1. MySQL 正式 DDL、索引与分区策略（按租户/时间）。
+  2. 批量提交 + 异步 flush + 失败缓冲策略。
+
+#### F. 5.6 / 5.7 Action Dispatcher + Action API 对接
+
+- **已实现**
+  - 4xx 不重试、5xx/超时重试、`1m/5m/1h/DLQ`、手工重放。
+  - HTTP 适配器对接 `POST /api/v1/actions/{action_id}/apply`。
+- **未实现/待补**
+  1. 与真实 action 执行状态回查闭环（`GET /actions/executions/{execution_id}` 定时补齐）。
+  2. 与 action 侧错误分类码表统一（当前为基础 HTTP 映射）。
+
+#### G. 7.x 一致性/可靠性/性能
+
+- **已实现**
+  - 至少一次 + 幂等消费语义的核心链路测试。
+  - 灰度门禁计算器（p95 / success_rate / dlq_ratio）。
+- **未实现/待补**
+  1. 发布“命令生效确认”分发链（command dispatch + ACK）。
+  2. 真实吞吐压测与 72h 稳定性验证证据。
+
+#### H. 8.x 安全与治理
+
+- **未实现/待补（关键缺口）**
+  1. 控制面 RBAC（`monitor_admin`）校验。
+  2. 租户配额（monitor 数、QPS、并发 action）限流门禁。
+  3. 审计 diff 落盘与操作追溯查询接口。
+
+#### I. 9.x 可观测性与运维
+
+- **部分实现**
+  - 有 rollout gate 评估逻辑。
+- **未实现/待补**
+  1. metrics 实际暴露（ingress/evaluator/action/storage 四类）。
+  2. 统一 trace/log 字段贯通。
+  3. `DLQ replay` CLI 与 `monitor dry-run` 命令化。
+
+### 16.3 与 10.2 验收标准的差距说明
+
+按 10.2 验收口径，当前实现属于“**可开发验证**”而非“**可上线验收完成**”。
+
+- 已具备：功能模板级验证能力（规则、过滤、求值、动作、DLQ）。
+- 尚缺：
+  1. 72h 稳态压测证据；
+  2. 生产级持久化与索引策略（MySQL）；
+  3. 实际可观测体系与灰度回滚自动化闭环。
+
+### 16.4 后续落地建议（按优先级）
+
+1. **P1（上线前必须）**
+   - Kafka 真链路接入（raw/normalized/retry/dlq）；
+   - MySQL Activity Writer 正式化（DDL+索引+批写）；
+   - action execution 回查任务与状态收敛。
+
+2. **P2（稳定性与治理）**
+   - RBAC + 配额 + 审计 diff；
+   - 指标与日志追踪标准化；
+   - 72h 灰度门禁自动化执行。
+
+3. **P3（规模优化）**
+   - 倒排索引与热规则缓存；
+   - Context Builder 的重试与恢复策略工程化；
+   - 为 Phase 2（L2/Replay）补充回放驱动器。
+
