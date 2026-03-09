@@ -98,7 +98,7 @@ formerly Materialize Worker]
       B5[Event Filter]
       B6[L1 Evaluator]
       B7[Activity Writer]
-      B8[(PostgreSQL Activity)]
+      B8[(MySQL Activity)]
       B9[Action Dispatcher]
       B10[(Retry Topics + DLQ)]
       B12[Retry Consumer / DLQ Replay Worker]
@@ -261,7 +261,7 @@ effect:
 
 ## 5.5 Activity Writer
 
-存储模型（PostgreSQL）：
+存储模型（MySQL）：
 - `monitor_evaluation`：每次求值一条。
 - `monitor_activity`：命中/动作结果聚合视图。
 - `action_delivery_log`：动作调用明细（含重试次数、错误码）。
@@ -414,19 +414,61 @@ Action Gateway 或目标系统需保证同 key 幂等。
 
 ## 10. Phase 1 实施拆解（6~8 周）
 
+在结合调研结论、总体设计约束与当前仓库（Python 主体、现有 action 可复用）后，原拆解方向总体正确：主干顺序应为“编译发布 -> 评估链路 -> 活动存储 -> action 闭环 -> 压测上线”。
+但实施时必须把以下内容前置到原计划中同步执行，避免后续返工：
+
+1. 前两周冻结三类契约：`ObjectChangeEvent`、`MonitorArtifact`、`Evaluation/Activity` 数据模型。
+2. 将 Outbox + CDC 归一化去重单列为前置里程碑，不与 Context Builder 混做一个任务包。
+3. Action 联调必须覆盖失败矩阵（4xx/5xx/超时/幂等冲突），不能只验证成功路径。
+4. 灰度上线必须量化门禁（流量比例、回滚阈值、DLQ 警戒线）。
+5. Python runtime 需显式纳入性能治理（多进程消费、批量提交、序列化复用）。
+
 ## 10.1 里程碑
 
-1. **W1-W2**：DSL 子集、编译器、artifact 发布链路。
-2. **W2-W4**：Context Builder Worker（原 Materialize Worker）+ Event Filter + L1 Evaluator 主链路联通。
-3. **W4-W5**：Activity 存储与查询 API。
-4. **W5-W6**：Action Dispatcher + Retry + DLQ + 幂等。
-5. **W6-W8**：压测、故障演练、灰度发布、上线验收。
+1. **W1：契约与骨架**
+   - 完成 DSL 最小子集校验与 artifact 原型。
+   - 冻结核心契约与 Python 包结构（`monitor/api`、`monitor/compiler`、`monitor/runtime`、`monitor/storage`）。
+   - 出口：样例规则 `plan_hash` 稳定，契约评审通过。
+
+2. **W2：发布链路与变更归一化**
+   - 打通 monitor definition/publish API（含版本切换与回滚元数据）。
+   - 落地 `object_change_raw -> normalize/dedupe -> object_change`，覆盖 Outbox+CDC 双发去重。
+   - 出口：重复事件不造成重复评估，版本回退进入 reconcile 队列。
+
+3. **W3：Context Builder + Event Filter**
+   - 完成主对象 + 一跳关系物化入 KV。
+   - 完成 `objectType + changed_fields + scope` 两层过滤与 artifact 热加载。
+   - 出口：候选筛选正确率达标，KV 快照版本与事件版本对齐。
+
+4. **W4：L1 Evaluator + Evaluation Ledger**
+   - 打通无状态表达式求值、幂等写入、`monitor_evaluation` 查询。
+   - 统一 `hit/miss` reason 编码。
+   - 出口：端到端（事件->求值）可运行，重复消费不重复记账。
+
+5. **W5：Action Dispatcher + Activity 闭环**
+   - 复用 action apply API，完成 `retry_1m/5m/1h + DLQ`。
+   - 建立错误分类（网络/5xx/4xx/幂等冲突）与 `activity_id` 手工重放能力。
+   - 出口：action 成功/失败/重试状态可追踪。
+
+6. **W6：联调与故障演练**
+   - 进行 Kafka 堵塞、KV 抖动、Action 超时、DB 慢写故障注入。
+   - 完成降级策略与 runbook（堆积、DLQ 暴涨、规则误发回滚）。
+   - 出口：典型故障可在 30 分钟内定位止血。
+
+7. **W7-W8：灰度与上线验收**
+   - 影子流量建议 5% -> 20% -> 50% 渐进灰度。
+   - 达标后全量；未达标按阈值自动回滚。
+   - 出口：连续 72h 稳定并完成复盘。
+
+实施依赖顺序固定为：**契约冻结 -> 归一化去重 -> 上下文物化/过滤 -> 求值 -> 动作闭环 -> 灰度上线**。若跳过前两步直接推进 Evaluator，返工成本最高。
 
 ## 10.2 验收标准
 
 - 功能验收：至少 5 类规则模板（阈值/状态组合/scope 过滤/空值/字符串匹配）。
 - 稳定性验收：连续 72h 压测无堆积失控。
 - 可追溯验收：任一 Activity 可追溯至事件、规则版本、动作日志。
+- 灰度门禁：`evaluation_latency_p95 < 3s`、`action_success_rate >= 99%`（可重试后）、`dlq_ratio < 0.1%`。
+- 运行治理：Python consumer 并发采用“多进程 + 分区粘性”，Activity 写入采用批量提交与异步 flush。
 
 ---
 
@@ -515,7 +557,7 @@ graph TD
   end
 
   K1[(Kafka object_change)] --> B1 --> B2 --> B3 --> B4
-  B5 --> P1[(PostgreSQL Activity)]
+  B5 --> P1[(MySQL Activity)]
   A4 --> R1[(Artifact Store)]
   R1 --> B2
   B4 -->|REST| A2

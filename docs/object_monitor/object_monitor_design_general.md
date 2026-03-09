@@ -164,8 +164,8 @@ sequenceDiagram
 | 条件求值 | Condition Evaluator | Condition / Evaluation | 表达式、持续时长、窗口聚合 | Flink SQL/CEP + CEL |
 | 效果执行 | Effect Planner/Executor | Actions / Notifications / Fallback | DAG 执行、重试、补偿 | Temporal |
 | 效果执行 | Effect Planner/Executor | Actions / Notifications / Fallback | 需 BPMN/人工节点时替代 | Camunda/Zeebe |
-| 审计回放 | Evaluation/Activity Ledger | Evaluation / Activity | 审计留痕、检索、回放索引 | PostgreSQL + ClickHouse |
-| 审计回放 | Evaluation/Activity Ledger | Evaluation / Activity | 搜索导向替代 | PostgreSQL + OpenSearch |
+| 审计回放 | Evaluation/Activity Ledger | Evaluation / Activity | 审计留痕、检索、回放索引 | MySQL + ClickHouse |
+| 审计回放 | Evaluation/Activity Ledger | Evaluation / Activity | 搜索导向替代 | MySQL + OpenSearch |
 
 > 说明：每行是“可选方案之一”，不是必须同时部署。
 
@@ -177,7 +177,7 @@ sequenceDiagram
 
 1. `Context Builder` 在 Flink 热路径高频查询 Neo4j/HugeGraph，容易形成反压与级联超时。
 2. `Flink 状态窗口` 与 `Ontology MVCC 快照` 双状态源并存，恢复/回放时存在状态撕裂风险。
-3. 运行栈过重（Neo4j + Flink + Temporal + Kafka + Redis + PostgreSQL + ClickHouse），超出多数私有化团队运维承载。
+3. 运行栈过重（Neo4j + Flink + Temporal + Kafka + Redis + MySQL + ClickHouse），超出多数私有化团队运维承载。
 4. 非复制模式在流算子内部外部回源，导致 slot 长时间阻塞、吞吐断崖。
 
 改造原则：
@@ -326,8 +326,8 @@ Flink CEP/Window]
 - Replay 按历史 plan_hash 回放并 append，不覆盖历史。
 
 #### 开源/自研建议
-- **推荐开源**：PostgreSQL + ClickHouse（事务写入 + 分析查询平衡）。
-- **备选开源**：PostgreSQL + OpenSearch（检索导向更强）。
+- **推荐开源**：MySQL + ClickHouse（事务写入 + 分析查询平衡）。
+- **备选开源**：MySQL + OpenSearch（检索导向更强）。
 - **自研部分**：回放编排器（时间窗切片、限流、在线流量隔离）与审计追踪 ID 贯通。
 
 ### 3.8 组件选型决策矩阵（开源 / 部分开源 / 自研）
@@ -349,7 +349,7 @@ Flink CEP/Window]
 ### 3.9 分阶段落地建议（按“自研比例”规划）
 
 1. **MVP（1M~10M）**：开源占比约 70%~80%。
-   - 开源：Kafka、Redis、CEL、PostgreSQL。
+   - 开源：Kafka、Redis、CEL、MySQL。
    - 自研：Definition/Compile/Release、Event Filter 索引、幂等与审计。
 2. **增强（10M~100M）**：开源占比约 60%~70%。
    - 新增开源：Flink CEP、ClickHouse。
@@ -430,7 +430,7 @@ Filter/Builder/Evaluator/Effect]
 
 ### 4.5 简要选型建议（首期）
 
-- 首期建议：`ANTLR + CEL + Flink + Temporal + PostgreSQL/ClickHouse`。
+- 首期建议：`ANTLR + CEL + Flink + Temporal + MySQL/ClickHouse`。
 - 不追求单产品全包，优先固化 DSL 语义与 Plan 契约。
 
 ---
@@ -442,7 +442,7 @@ Filter/Builder/Evaluator/Effect]
 - 消息总线：Kafka（或 Pulsar）。
 - 流式评估：Flink（CEP + 状态管理）。
 - 控制与 API：Python/Go 服务。
-- 存储：PostgreSQL（定义 + 活动），ClickHouse/OpenSearch（审计检索）。
+- 存储：MySQL（定义 + 活动），ClickHouse/OpenSearch（审计检索）。
 - 编排：Temporal（动作执行与补偿）。
 
 ### 5.2 可替换原则
