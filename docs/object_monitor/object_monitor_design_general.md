@@ -51,10 +51,10 @@
 
 ---
 
-## 3. 总体架构（控制面 + 数据面 + 治理面）
+## 3. 总体架构（管控面 + 数据面 + 治理面）
 
 > 本章目标：回答三个核心问题——
-> 1）控制面到底负责什么；2）控制面与数据面是否必须通过 `compiled plan` 交互；3）当前控制面能力哪些是必须、哪些可后置。
+> 1）管控面到底负责什么；2）管控面与数据面是否必须通过 `compiled plan` 交互；3）当前管控面能力哪些是必须、哪些可后置。
 
 ### 3.1 逻辑架构图（Mermaid `graph TD`）
 
@@ -62,7 +62,7 @@
 graph TD
     U[Rules Author / Admin]
 
-    subgraph CP[Control Plane]
+    subgraph CP[管控面 Management & Control Plane]
       CP1[Definition API]
       CP2[Validator & Type Checker]
       CP3[Policy Engine
@@ -95,14 +95,14 @@ ConditionPlan/EffectPlan]
       G4[Quota/Cost Analyzer]
     end
 
-    %% 控制面内部逻辑关系
+    %% 管控面内部逻辑关系
     U --> CP1
     CP1 --> CP2 --> CP3 --> CP4 --> CP5
     CP5 --> CP6
     CP5 --> CP7
     CP5 --> CP8
 
-    %% 控制面 -> 数据面三通道
+    %% 管控面 -> 数据面三通道
     CP6 -- Plan Artifact --> DP2
     CP7 -- Lifecycle Command --> DP2
     CP8 -- Runtime Config --> DP2
@@ -130,9 +130,9 @@ ConditionPlan/EffectPlan]
 > 说明：该图采用 `graph TD` 表达“组件逻辑关系与跨平面契约”，不强调严格执行时序；发布/生效时序请参考 3.8。
 
 
-### 3.2 控制面的职责边界（建议收敛）
+### 3.2 管控面的职责边界（建议收敛）
 
-控制面应坚持“**不处理业务事件，只生产运行契约**”。建议拆成三类：
+管控面应坚持“**不处理业务事件，只生产运行契约**”。建议拆成三类：
 
 1. **必须能力（MVP 必选）**
    - DSL/API 接入与语义校验。
@@ -149,9 +149,9 @@ ConditionPlan/EffectPlan]
    - 规则推荐、冲突智能诊断。
    - 成本预测与自动调参。
 
-> 结论：当前控制面“看起来很多内容”是因为把“必需能力”和“增强能力”混在一起了。建议按上面三层拆分，可显著降低首期复杂度。
+> 结论：当前管控面“看起来很多内容”是因为把“必需能力”和“增强能力”混在一起了。建议按上面三层拆分，可显著降低首期复杂度。
 
-### 3.3 控制面与数据面交互：是否只用 compile plan？
+### 3.3 管控面与数据面交互：是否只用 compile plan？
 
 不是只能用 `compiled plan`，但**compiled plan 作为主协议仍是最稳妥方案**。建议采用“三通道交互”而不是单通道：
 
@@ -169,7 +169,7 @@ ConditionPlan/EffectPlan]
 
 ### 3.4 为什么不建议只靠“动态解释执行”
 
-可选替代方案是“控制面只存 DSL，数据面实时解释”。该模式灵活但有明显问题：
+可选替代方案是“管控面只存 DSL，数据面实时解释”。该模式灵活但有明显问题：
 
 - 热路径性能抖动大，且难做静态优化（字段依赖索引、执行计划裁剪）。
 - 多 runtime 下一致性风险更高（解释器版本漂移）。
@@ -177,9 +177,9 @@ ConditionPlan/EffectPlan]
 
 因此建议：**主路径使用编译产物执行**，动态解释仅用于低频调试/手动验证。
 
-### 3.5 控制面最小化落地清单（可直接用于实现）
+### 3.5 管控面最小化落地清单（可直接用于实现）
 
-首期控制面建议仅保留 6 个核心服务：
+首期管控面建议仅保留 6 个核心服务：
 
 1. `Definition Service`：规则 CRUD（含草稿）。
 2. `Validation Service`：语法/类型/复杂度校验。
@@ -190,7 +190,7 @@ ConditionPlan/EffectPlan]
 
 非首期可延后：策略推荐、成本优化、高级冲突分析。
 
-### 3.6 关键一致性约束（控制面-数据面契约）
+### 3.6 关键一致性约束（管控面-数据面契约）
 
 1. 数据面只消费 `published` 且签名/哈希校验通过的 artifact。
 2. 任一 Evaluation/Activity 必须落 `monitor_id + version + plan_hash`。
@@ -201,18 +201,18 @@ ConditionPlan/EffectPlan]
 
 | 分层 | 组件 | 是否首期必需 | 说明 |
 |---|---|---|---|
-| 控制面 | Definition API / Validation / Compile / Release | 必需 | 无法缺省，缺失则无法形成稳定发布链路 |
-| 控制面 | Policy Engine（RBAC+Tenant） | 必需 | 多租户与权限安全底线 |
-| 控制面 | Registry | 必需 | 统一 artifact 真值源 |
-| 控制面 | Command Dispatcher | 建议 | 支撑 pause/rollback/replay 快速控制 |
-| 控制面 | Runtime Config Manager | 建议 | 降低“参数变更=重新发布”的成本 |
-| 控制面 | 智能推荐/冲突检测 | 可后置 | 不影响核心闭环 |
+| 管控面 | Definition API / Validation / Compile / Release | 必需 | 无法缺省，缺失则无法形成稳定发布链路 |
+| 管控面 | Policy Engine（RBAC+Tenant） | 必需 | 多租户与权限安全底线 |
+| 管控面 | Registry | 必需 | 统一 artifact 真值源 |
+| 管控面 | Command Dispatcher | 建议 | 支撑 pause/rollback/replay 快速控制 |
+| 管控面 | Runtime Config Manager | 建议 | 降低“参数变更=重新发布”的成本 |
+| 管控面 | 智能推荐/冲突检测 | 可后置 | 不影响核心闭环 |
 | 数据面 | Filter/Context/Evaluator/Effect | 必需 | 规则执行主路径 |
 | 数据面 | Retry+DLQ+Replay | 必需 | 可靠性与恢复底线 |
 | 治理面 | SLI/SLO + Audit | 必需 | 运维与合规底线 |
 | 治理面 | 成本分析/高级画像 | 建议 | 优化项，可后置 |
 
-### 3.8 控制面-数据面交互时序（发布与生效）
+### 3.8 管控面-数据面交互时序（发布与生效）
 
 ```mermaid
 sequenceDiagram
@@ -239,86 +239,276 @@ sequenceDiagram
 
 ### 3.9 总体架构优化结论（针对当前疑问）
 
-1. **控制面不是越多越好**：首期应收敛到“定义-校验-编译-发布-鉴权-注册”闭环。
+1. **管控面不是越多越好**：首期应收敛到“定义-校验-编译-发布-鉴权-注册”闭环。
 2. **compile plan 需要保留为主通道**：它是确定性、可审计、可回放的基础。
 3. **但不应只有 compile plan**：生命周期命令与运行参数快照应独立通道承载。
-4. **治理面建议与数据面双向闭环**：治理输出（如超配额、错误分类）应反向驱动控制面策略调整。
+4. **治理面建议与数据面双向闭环**：治理输出（如超配额、错误分类）应反向驱动管控面策略调整。
+
 
 ---
 
 ## 4. 核心执行链路设计（事件触发）
 
-### 4.1 Event Filter（候选规则筛选）
+> 本章在既有“Event Filter -> Context Builder -> Evaluator -> Effect”主线基础上，补齐实现细节、边界语义与开源组件匹配，目标是把链路从“概念图”推进到“可实施方案”。
 
-三段式过滤，避免全量规则求值：
+### 4.1 端到端执行分层（与 Palantir 语义映射）
 
-1. `objectType` 预过滤。
-2. `scope/tenant/tag` 过滤。
-3. `changedFields` 增量过滤（仅字段相关规则进入候选集）。
+| 本方案组件 | 对应 Palantir 语义 | 关键职责 | 首选开源实现 |
+|---|---|---|---|
+| Trigger Ingress | Input / Condition Trigger | 接收对象变更与时间触发 | Kafka/Pulsar + Quartz/Argo Events |
+| Event Filter | Input 预筛选 | 候选规则裁剪，避免全量求值 | Flink Broadcast State / Kafka Streams |
+| Context Builder | Input 组装 | 拼装对象快照、关系、外部输入 | Flink Async I/O + Redis + PostgreSQL/Elastic |
+| Condition Evaluator | Condition / Evaluation | 阈值、持续时长、窗口计算 | Flink SQL/CEP/Stateful Functions |
+| Effect Planner/Executor | Actions / Notifications / Fallback | 执行 effect、重试、补偿 | Temporal/Camunda + 消息队列 |
+| Evaluation/Activity Ledger | Evaluation / Activity | 评估与动作审计留痕 | PostgreSQL + ClickHouse/OpenSearch |
 
-输出：`MatchedMonitorCandidates[]`，包含 `monitorId/version/requiredInputsRef`。
+### 4.2 Trigger Ingress（触发接入层）
 
-### 4.2 Context Builder（评估上下文构建）
+#### 实现思路
 
-按优先级读取：
+1. **事件触发**：统一接入 `ObjectChangeEvent`（对象语义事件），避免直接消费原始 CDC。
+2. **时间触发**：支持 cron/interval，与事件触发共用同一 evaluator。
+3. **手动触发**：manual-run/replay 进入同一入口，确保语义一致。
 
-1. 对象快照（复制模式优先）。
-2. 关系对象（按 InputBinding 声明拉取）。
-3. 外部输入（非复制模式按适配器拉取并缓存）。
+#### 开源软件匹配
 
-输出：`EvaluationContext`（含 `snapshot_hash`、`source_watermark`、`data_freshness_ms`）。
+- **Kafka / Pulsar**：高吞吐事件总线、可重放、分区有序。
+- **Quartz / Argo Events**：时间触发器和周期任务调度。
+- **Schema Registry（Confluent/Apicurio）**：事件 schema 演进控制。
 
-### 4.3 Condition Evaluator（条件求值）
+### 4.3 Event Filter（候选规则筛选）
 
-支持三类规则：
+#### 实现思路
 
-1. 阈值/布尔规则（即时判断）。
-2. 持续时长规则（状态机维护：`IDLE->ENTERED->FIRING->COOLDOWN`）。
-3. 窗口聚合规则（count/sum/rate over window）。
+采用“三层索引 + 一次命中”策略：
 
-输出：`EvaluationRecord(match/reason/latency/triggerType)`。
+1. `objectType -> monitor_ids`（粗筛）。
+2. `tenant/scope/tag -> monitor_ids`（租户与作用域筛选）。
+3. `changedField -> monitor_ids`（增量字段筛选）。
 
-### 4.4 Effect Execution（动作与通知执行）
+最终输出 `MatchedMonitorCandidates[]`（带 `monitor_id/version/plan_hash/required_inputs`）。
 
-执行策略：
+#### 关键工程点
 
-- 主 effect 并行或串行（按策略配置）。
-- 失败重试：指数退避 + 最大重试次数。
-- 主 effect 失败后触发 fallback effect。
-- 所有 effect 写 `idempotency_key` 保障幂等。
+- 字段索引由编译阶段生成（field dependency index）。
+- 使用广播状态热更新规则索引，避免频繁重启作业。
+- 候选规则上限保护（每事件 max N），超限进入降级路径并记审计。
 
-输出：`ActivityRecord(effect_results/retry_trace/error_code)`。
+#### 开源软件匹配
+
+- **Flink Broadcast State**：规则索引分发与热更新。
+- **Kafka Streams GlobalKTable**：轻量场景的规则索引共享。
+- **Redis**：极端低延迟场景做二级缓存。
+
+### 4.4 Context Builder（评估上下文构建）
+
+#### 实现思路
+
+按“快照优先、按需补齐、失败可降级”构建 `EvaluationContext`：
+
+1. 读取对象快照（复制模式主路径）。
+2. 按 InputBinding 拉取关系对象（限制 fan-out）。
+3. 非复制输入通过 Adapter 回源并带版本戳。
+4. 生成上下文质量标识：`data_freshness_ms/stale_context/source_version`。
+
+#### 关键工程点
+
+- 通过 `snapshot_hash + source_watermark` 固化评估输入。
+- 外部回源采用异步 I/O + TTL 缓存，避免阻塞 evaluator。
+- 关系读取设置 `max_join_depth` 与 `max_related_objects` 防止雪崩。
+
+#### 开源软件匹配
+
+- **Flink Async I/O**：异步回源与超时控制。
+- **Redis / Caffeine**：输入缓存（分布式 + 进程内）。
+- **Debezium + Kafka Connect**：复制模式下的对象投影构建链路。
+
+### 4.5 Condition Evaluator（条件求值引擎）
+
+#### 实现思路
+
+支持三类规则并统一 IR 执行：
+
+1. 阈值/布尔：表达式直接求值。
+2. 持续时长：状态机 `IDLE -> ENTERED -> FIRING -> COOLDOWN`。
+3. 窗口聚合：基于事件时间窗口计算 `count/sum/rate`。
+
+输出 `EvaluationRecord(match/reason/latency/trigger_type/version)`。
+
+#### 关键工程点
+
+- 以**事件时间**为主，处理时间兜底；明确 watermark 策略。
+- 去重键：`monitor_id + object_id + trigger_bucket + plan_hash`。
+- 迟到数据策略：可配置“补评估并追加 activity”或“仅审计”。
+
+#### 开源软件匹配
+
+- **Flink CEP/SQL**：持续时长与窗口规则。
+- **Drools / Aviator / CEL(Java/Go)**：表达式引擎（离线编译后执行）。
+- **RocksDB State Backend（Flink）**：大状态容器。
+
+### 4.6 Effect Planner / Executor（动作执行与补偿）
+
+#### 实现思路
+
+1. Effect Planner 根据策略生成 DAG（串行/并行/条件分支）。
+2. Executor 按 effect 类型分池执行（notification/action/function）。
+3. 失败走重试策略，超过阈值触发 fallback。
+4. 写入 `ActivityRecord(effect_results/retry_trace/error_code)`。
+
+#### 关键工程点
+
+- `idempotency_key` 必填（外部动作防重）。
+- effect budget（每规则/租户速率上限）。
+- 故障域隔离：通知通道故障不阻断评估主链路。
+
+#### 开源软件匹配
+
+- **Temporal**：有状态重试、补偿、超时与可观测执行。
+- **Camunda/Zeebe**：BPMN 编排与人工节点（可选）。
+- **Resilience4j**：熔断/限流/重试策略库。
+
+### 4.7 Ledger / Replay（审计与回放）
+
+#### 实现思路
+
+- Evaluation 与 Activity 双 ledger 分离存储：
+  - Evaluation 偏写入吞吐与规则分析。
+  - Activity 偏审计检索与取证。
+- Replay 读取历史事件并按“历史 plan_hash”重放，结果 append 不覆盖。
+
+#### 开源软件匹配
+
+- **PostgreSQL**：事务型定义与关键审计索引。
+- **ClickHouse / OpenSearch**：高基数活动检索与聚合分析。
+- **Apache Hudi/Iceberg**：历史事件湖仓回放数据源（可选）。
 
 ---
 
 ## 5. DSL 与规则治理设计（v0.2）
 
-### 5.1 DSL 必备能力
+> 目标：把 DSL 从“可写规则”升级为“可编译、可治理、可审计、可回放”的规则工程体系。
 
-1. `scope`：对象类型 + 过滤器。
-2. `input`：多输入绑定（对象属性、关系属性、外部适配器）。
-3. `condition`：布尔表达式 + `duration()` + 窗口函数。
+### 5.1 DSL 语义模型（与 Palantir Monitor/Input/Condition 对齐）
+
+建议 DSL 结构保持五段式：
+
+1. `scope`：对象类型、对象集、租户范围。
+2. `input`：对象属性、关系属性、外部输入绑定。
+3. `condition`：布尔表达式、duration、窗口函数。
 4. `effects`：action/notification/function/logic/fallback。
-5. `policy`：dedup、cooldown、severity、retry、rate-limit。
+5. `policy`：去重、冷却、重试、速率限制、冲突策略。
 
-### 5.2 语义约束
+### 5.2 DSL 编译链路（Parser -> AST -> IR -> Plan）
 
-- 条件表达式必须返回 `bool`。
-- 单规则 AST 节点数、嵌套深度、输入绑定数设上限。
-- 编译期必须生成 `field dependency index`（服务 Event Filter）。
+#### 实现思路
 
-### 5.3 冲突裁决
+1. **Parser/AST**：完成语法解析与类型标注。
+2. **Semantic Check**：字段存在性、类型约束、跨输入一致性。
+3. **IR Lowering**：将表达式降级为统一中间表示（便于多引擎执行）。
+4. **Plan Emit**：输出 `ConditionPlan + EffectPlan + FieldDependencyIndex`。
 
-默认策略：`highest-severity-wins`。
-可选：`multi-fire` / `first-match`。
+#### 开源软件匹配
 
-同快照、同版本下结果必须确定性一致。
+- **ANTLR**：DSL 语法定义与解析器生成。
+- **CEL / JsonLogic / Aviator**：表达式 IR 的执行后端候选。
+- **OPA(Rego) / OpenPolicyAgent**：治理策略与准入校验（可选）。
+
+### 5.3 DSL 关键能力深入设计
+
+#### 5.3.1 scope
+
+- 支持 `objectType + predicate`，并可引用对象集（Object Set）。
+- 编译后生成 `scope_index`，服务 Event Filter 粗筛。
+
+#### 5.3.2 input
+
+- `from.object`, `from.relation`, `from.external` 三类输入源。
+- 每个输入绑定要求声明 freshness 与 timeout。
+- 编译后生成输入依赖图，供 Context Builder 并行拉取。
+
+#### 5.3.3 condition
+
+- 基础表达式：比较、逻辑、算术、空值处理。
+- duration：`duration(cond, "10m")`，依赖状态机。
+- window：`count/sum/rate over tumble/hop/sliding`。
+
+#### 5.3.4 effects
+
+- 支持多 effect DAG 与 fallback 分支。
+- effect 声明 side-effect 等级（low/medium/high），决定重试与审批策略。
+
+#### 5.3.5 policy
+
+- `dedup(window)`：去重窗口。
+- `cooldown("15m")`：抑制告警风暴。
+- `severity`：冲突裁决优先级。
+- `retry`/`rate_limit`：动作执行治理。
+
+### 5.4 DSL 语义约束与静态门禁
+
+必须在编译期阻断的高风险规则：
+
+1. 条件表达式返回非 `bool`。
+2. 输入绑定过多或 join 深度超阈值。
+3. 高风险 action 无 fallback。
+4. Non-copy 输入未声明 freshness/sla。
+
+建议默认门禁参数：
+
+- AST 节点数 <= 200
+- 表达式嵌套深度 <= 12
+- 输入绑定数 <= 20
+- 单规则窗口状态 key 上限可配置
+
+### 5.5 冲突裁决与确定性语义
+
+- 默认：`highest-severity-wins`。
+- 可选：`multi-fire` / `first-match`。
+- 同 `snapshot_hash + plan_hash` 下结果必须确定。
+- 回放按历史版本解释，不得按最新 DSL 语义重算。
+
+### 5.6 DSL 示例（面向实现）
+
+```yaml
+monitor:
+  id: overheat_line_a
+  scope:
+    object_type: Device
+    where: "factory == 'A'"
+  input:
+    - name: temp
+      from: object.temperature
+    - name: owner
+      from: relation.owner.name
+  condition: "duration(temp > 80, '10m') and owner != null"
+  effects:
+    - type: notification
+      channel: webhook
+    - type: action
+      action_ref: create_incident
+      fallback:
+        type: notification
+        channel: email
+  policy:
+    severity: P1
+    dedup: "5m"
+    cooldown: "15m"
+```
+
+### 5.7 DSL 工程化开源组合建议
+
+- **语言与编译**：ANTLR + 自定义 AST/IR。
+- **表达式执行**：CEL（高安全）或 Aviator（Java 生态成熟）。
+- **规则热更新**：Flink Broadcast + Plan Registry。
+- **策略治理**：OPA（租户策略、准入策略统一）。
+- **规则测试**：内置规则单测框架（golden case + 回放 case）。
 
 ---
 
-## 6. API 与错误模型（控制面/数据面）
+## 6. API 与错误模型（管控面/数据面）
 
-### 6.1 控制面 API
+### 6.1 管控面 API
 
 - `POST /v1/monitors`：创建规则。
 - `POST /v1/monitors/{id}/publish`：发布版本。
@@ -398,7 +588,7 @@ sequenceDiagram
 ### Phase 1（8~10 周）
 
 - DSL v0.2（阈值 + 持续时长 + 基础窗口）。
-- 控制面（创建/发布/暂停/回滚）。
+- 管控面（创建/发布/暂停/回滚）。
 - Runtime MVP（Event Filter/Context Builder/Evaluator/Activity）。
 - 通知通道（Email + Webhook）。
 - 观测面板与基础告警。
