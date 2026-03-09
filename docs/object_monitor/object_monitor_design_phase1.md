@@ -503,8 +503,7 @@ graph TD
     A1[instance module]
     A2[action module]
     A3[search module]
-    A4[monitor control module
-(Definition/Release)]
+    A4[monitor control module<br/>Definition/Release]
   end
 
   subgraph RT[monitor-runtime process]
