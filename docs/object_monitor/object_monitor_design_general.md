@@ -127,7 +127,7 @@ ConditionPlan/EffectPlan]
     G3 -. 审计反馈 .-> CP5
 ```
 
-> 说明：该图采用 `graph TD` 表达“组件逻辑关系与跨平面契约”，不强调严格执行时序；发布/生效时序请参考 3.8。
+> 说明：该图采用 `graph TD` 表达“组件逻辑关系与跨平面契约”，不强调严格执行时序；发布/生效时序请参考 3.5。
 
 
 ### 3.2 管控面的职责边界（建议收敛）
@@ -151,53 +151,32 @@ ConditionPlan/EffectPlan]
 
 > 结论：当前管控面“看起来很多内容”是因为把“必需能力”和“增强能力”混在一起了。建议按上面三层拆分，可显著降低首期复杂度。
 
-### 3.3 管控面与数据面交互：是否只用 compile plan？
+### 3.3 执行策略与管控面最小服务（合并）
 
-不是只能用 `compiled plan`，但**compiled plan 作为主协议仍是最稳妥方案**。建议采用“三通道交互”而不是单通道：
+#### 动态解释 vs 计划编译（简要对比）
 
-1. **Artifact 通道（主通道）**
-   - 传输不可变 `compiled plan`（含 plan_hash/version）。
-   - 优点：可审计、可回滚、便于多 runtime 一致加载。
+- **动态解释执行（管控面只存 DSL，数据面实时解释）**
+  - 优点：灵活，规则变更即时生效。
+  - 缺点：热路径性能抖动大、难做静态优化；多 runtime 下存在解释器漂移风险；审计与回放难以稳定复现。
 
-2. **Lifecycle Command 通道（控制通道）**
-   - 传输 `publish/pause/resume/rollback/replay` 指令。
-   - 目的：避免每次状态变更都重新编译并全量下发 artifact。
+- **计划编译执行（推荐主路径）**
+  - 方式：发布前将规则编译为不可变 `compiled plan`（含 `plan_hash/version`），数据面按 artifact 执行。
+  - 优点：确定性更强、可审计可回滚、便于多 runtime 一致加载。
 
-3. **Runtime Config Snapshot 通道（配置通道）**
-   - 传输运行参数（限流阈值、重试参数、开关策略）。
-   - 目的：将“逻辑定义”与“运行参数”解耦，减少频繁发版。
+结论：**主路径采用计划编译执行，动态解释仅用于低频调试/手动验证。**
 
-### 3.4 为什么不建议只靠“动态解释执行”
-
-可选替代方案是“管控面只存 DSL，数据面实时解释”。该模式灵活但有明显问题：
-
-- 热路径性能抖动大，且难做静态优化（字段依赖索引、执行计划裁剪）。
-- 多 runtime 下一致性风险更高（解释器版本漂移）。
-- 审计与回放时，难以稳定复现“当时语义”。
-
-因此建议：**主路径使用编译产物执行**，动态解释仅用于低频调试/手动验证。
-
-### 3.5 管控面最小化落地清单（可直接用于实现）
-
-首期管控面建议仅保留 6 个核心服务：
+#### 管控面首期 6 个核心服务
 
 1. `Definition Service`：规则 CRUD（含草稿）。
 2. `Validation Service`：语法/类型/复杂度校验。
-3. `Compile Service`：生成 `ConditionPlan/EffectPlan` + hash。
+3. `Compile Service`：生成 `ConditionPlan/EffectPlan` + `plan_hash`。
 4. `Release Service`：发布、暂停、回滚、版本切换。
 5. `Auth Service`：RBAC 与租户边界校验。
 6. `Registry Service`：artifact 元数据与分发索引。
 
-非首期可延后：策略推荐、成本优化、高级冲突分析。
+> 非首期可后置：策略推荐、成本优化、高级冲突分析。
 
-### 3.6 关键一致性约束（管控面-数据面契约）
-
-1. 数据面只消费 `published` 且签名/哈希校验通过的 artifact。
-2. 任一 Evaluation/Activity 必须落 `monitor_id + version + plan_hash`。
-3. `rollback` 语义是“切换生效版本”，不是修改历史版本。
-4. 生命周期命令必须幂等（带 command_id）。
-
-### 3.7 组件分层与必要性判定（建议）
+### 3.4 组件分层与必要性判定（建议）
 
 | 分层 | 组件 | 是否首期必需 | 说明 |
 |---|---|---|---|
@@ -212,7 +191,7 @@ ConditionPlan/EffectPlan]
 | 治理面 | SLI/SLO + Audit | 必需 | 运维与合规底线 |
 | 治理面 | 成本分析/高级画像 | 建议 | 优化项，可后置 |
 
-### 3.8 管控面-数据面交互时序（发布与生效）
+### 3.5 管控面-数据面交互时序（发布与生效）
 
 ```mermaid
 sequenceDiagram
@@ -237,7 +216,7 @@ sequenceDiagram
     Cmd-->>Rel: 生效确认
 ```
 
-### 3.9 总体架构优化结论（针对当前疑问）
+### 3.6 总体架构优化结论（针对当前疑问）
 
 1. **管控面不是越多越好**：首期应收敛到“定义-校验-编译-发布-鉴权-注册”闭环。
 2. **compile plan 需要保留为主通道**：它是确定性、可审计、可回放的基础。
@@ -387,122 +366,83 @@ sequenceDiagram
 
 ## 5. DSL 与规则治理设计（v0.2）
 
-> 目标：把 DSL 从“可写规则”升级为“可编译、可治理、可审计、可回放”的规则工程体系。
+> 目标：把 DSL 从“可写规则”收敛为“可编译、可治理、可审计、可回放”的最小闭环。
 
-### 5.1 DSL 语义模型（与 Palantir Monitor/Input/Condition 对齐）
+### 5.1 逻辑视图（模块与交互）
 
-建议 DSL 结构保持五段式：
+```mermaid
+flowchart LR
+    A[Rule Author]
+    B[DSL
+scope/input/condition/effects/policy]
+    C[Parser + AST]
+    D[Semantic Gate
+type/complexity/risk]
+    E[IR Lowering]
+    F[Plan Emit
+ConditionPlan/EffectPlan/FieldIndex]
+    G[(Plan Registry)]
+    H[Runtime
+Filter/Builder/Evaluator/Effect]
+    I[(Evaluation/Activity Ledger)]
 
-1. `scope`：对象类型、对象集、租户范围。
-2. `input`：对象属性、关系属性、外部输入绑定。
-3. `condition`：布尔表达式、duration、窗口函数。
+    A --> B --> C --> D --> E --> F --> G --> H --> I
+    D -- reject --> A
+    H -- replay/manual --> H
+```
+
+**交互说明（简化）**
+- DSL 仍保持五段式：`scope/input/condition/effects/policy`。
+- 编译主链路：`Parser -> Semantic Gate -> IR -> Plan`，失败在门禁阶段直接阻断。
+- Runtime 不解释原始 DSL，只消费 Plan；结果写入 Evaluation/Activity 审计账本。
+
+### 5.2 最小语义与编译产物
+
+**DSL 五段式（保留）**
+1. `scope`：对象范围与对象集。
+2. `input`：对象/关系/外部输入绑定（含 freshness、timeout）。
+3. `condition`：布尔表达式 + duration + window。
 4. `effects`：action/notification/function/logic/fallback。
-5. `policy`：去重、冷却、重试、速率限制、冲突策略。
+5. `policy`：dedup/cooldown/retry/rate_limit/severity。
 
-### 5.2 DSL 编译链路（Parser -> AST -> IR -> Plan）
+**编译产物（最小集合）**
+- `ConditionPlan`
+- `EffectPlan`
+- `FieldDependencyIndex`（供 Event Filter 预筛）
 
-#### 实现思路
+### 5.3 静态门禁（保留核心）
 
-1. **Parser/AST**：完成语法解析与类型标注。
-2. **Semantic Check**：字段存在性、类型约束、跨输入一致性。
-3. **IR Lowering**：将表达式降级为统一中间表示（便于多引擎执行）。
-4. **Plan Emit**：输出 `ConditionPlan + EffectPlan + FieldDependencyIndex`。
-
-#### 开源软件匹配
-
-- **ANTLR**：DSL 语法定义与解析器生成。
-- **CEL / JsonLogic / Aviator**：表达式 IR 的执行后端候选。
-- **OPA(Rego) / OpenPolicyAgent**：治理策略与准入校验（可选）。
-
-### 5.3 DSL 关键能力深入设计
-
-#### 5.3.1 scope
-
-- 支持 `objectType + predicate`，并可引用对象集（Object Set）。
-- 编译后生成 `scope_index`，服务 Event Filter 粗筛。
-
-#### 5.3.2 input
-
-- `from.object`, `from.relation`, `from.external` 三类输入源。
-- 每个输入绑定要求声明 freshness 与 timeout。
-- 编译后生成输入依赖图，供 Context Builder 并行拉取。
-
-#### 5.3.3 condition
-
-- 基础表达式：比较、逻辑、算术、空值处理。
-- duration：`duration(cond, "10m")`，依赖状态机。
-- window：`count/sum/rate over tumble/hop/sliding`。
-
-#### 5.3.4 effects
-
-- 支持多 effect DAG 与 fallback 分支。
-- effect 声明 side-effect 等级（low/medium/high），决定重试与审批策略。
-
-#### 5.3.5 policy
-
-- `dedup(window)`：去重窗口。
-- `cooldown("15m")`：抑制告警风暴。
-- `severity`：冲突裁决优先级。
-- `retry`/`rate_limit`：动作执行治理。
-
-### 5.4 DSL 语义约束与静态门禁
-
-必须在编译期阻断的高风险规则：
-
+编译期必须阻断：
 1. 条件表达式返回非 `bool`。
-2. 输入绑定过多或 join 深度超阈值。
+2. 输入绑定/关联深度超阈值。
 3. 高风险 action 无 fallback。
-4. Non-copy 输入未声明 freshness/sla。
+4. Non-copy 输入未声明 freshness/SLA。
 
-建议默认门禁参数：
-
+默认门禁参数：
 - AST 节点数 <= 200
 - 表达式嵌套深度 <= 12
 - 输入绑定数 <= 20
-- 单规则窗口状态 key 上限可配置
 
-### 5.5 冲突裁决与确定性语义
+### 5.4 开源软件对标结论（重点）
 
-- 默认：`highest-severity-wins`。
-- 可选：`multi-fire` / `first-match`。
-- 同 `snapshot_hash + plan_hash` 下结果必须确定。
-- 回放按历史版本解释，不得按最新 DSL 语义重算。
+**结论：目前没有“单一开源软件”可完整 1:1 对标 Palantir Object Monitor/Automate 全栈能力。**
 
-### 5.6 DSL 示例（面向实现）
+更现实路径是“组合式架构”：
 
-```yaml
-monitor:
-  id: overheat_line_a
-  scope:
-    object_type: Device
-    where: "factory == 'A'"
-  input:
-    - name: temp
-      from: object.temperature
-    - name: owner
-      from: relation.owner.name
-  condition: "duration(temp > 80, '10m') and owner != null"
-  effects:
-    - type: notification
-      channel: webhook
-    - type: action
-      action_ref: create_incident
-      fallback:
-        type: notification
-        channel: email
-  policy:
-    severity: P1
-    dedup: "5m"
-    cooldown: "15m"
-```
+| 能力段 | 推荐开源组件 | 说明 |
+|---|---|---|
+| DSL 解析/编译 | ANTLR + 自定义 AST/IR | 负责语法与编译，不负责运行态状态管理 |
+| 表达式执行 | CEL / Aviator | 负责 condition 求值，需与状态机/窗口引擎配合 |
+| 流式状态与窗口 | Flink SQL/CEP/Stateful | 负责 duration/window/乱序处理 |
+| 规则热更新 | Flink Broadcast + Plan Registry | 负责 plan 分发与热加载 |
+| effect 编排与补偿 | Temporal（或 Camunda） | 负责重试、超时、补偿、可观测流程 |
+| 治理策略 | OPA（可选） | 负责准入与租户策略，不替代规则执行引擎 |
 
-### 5.7 DSL 工程化开源组合建议
+### 5.5 简要选型建议（首期）
 
-- **语言与编译**：ANTLR + 自定义 AST/IR。
-- **表达式执行**：CEL（高安全）或 Aviator（Java 生态成熟）。
-- **规则热更新**：Flink Broadcast + Plan Registry。
-- **策略治理**：OPA（租户策略、准入策略统一）。
-- **规则测试**：内置规则单测框架（golden case + 回放 case）。
+- 首期建议采用“**ANTLR + CEL + Flink + Temporal + PostgreSQL/ClickHouse**”组合。
+- 不建议追求“单产品全包”，重点是先固化 DSL 语义、Plan 契约和审计一致性。
+- 若团队语言栈偏 Java，可优先 `Aviator + Flink`；偏多语言安全策略，可优先 `CEL`。
 
 ---
 
@@ -583,31 +523,6 @@ monitor:
 
 ---
 
-## 9. 分阶段实施计划
-
-### Phase 1（8~10 周）
-
-- DSL v0.2（阈值 + 持续时长 + 基础窗口）。
-- 管控面（创建/发布/暂停/回滚）。
-- Runtime MVP（Event Filter/Context Builder/Evaluator/Activity）。
-- 通知通道（Email + Webhook）。
-- 观测面板与基础告警。
-
-### Phase 2（8~12 周）
-
-- Effect 执行器完善（action/function/logic/fallback）。
-- 批量回放与对账。
-- Non-copy 适配器、缓存、补偿链路。
-- 多租户配额与复杂度治理。
-
-### Phase 3（持续）
-
-- 行业模板（金融风控、制造设备健康）。
-- 规则推荐与冲突检测。
-- 成本优化（冷热分层、状态压缩、弹性扩缩容）。
-
----
-
 ## 10. 验收标准（可直接用于里程碑 Gate）
 
 1. **正确性**：同输入快照、同版本下评估结果一致率 100%。
@@ -618,26 +533,18 @@ monitor:
 
 ---
 
-## 11. 当前方案关键升级点
+## 12. 不同数据模式下的 Object Monitor 机制设计（重构）
 
-1. 从“组件堆叠”升级为“语义模型驱动”的架构设计。
-2. 显式引入 `Event Filter + Context Builder` 两级降本机制。
-3. 将 fallback/手动执行/错误分类纳入一等公民能力。
-4. 将 Copy/Non-copy 的一致性协议从概念描述升级为可实施约束。
-5. 补全可观测与验收闭环，支持从 PoC 到生产的治理落地。
+> 本章重构目标：明确“触发从哪里来、上下文从哪里取、一致性如何保证、故障如何补偿”。
 
----
-
-## 12. 不同数据模式下的 Object Monitor 机制设计
-
-### 12.1 复制模式（Copy/Materialized）下 Object Monitor 总体方案设计
+### 12.1 复制模式（Copy/Materialized）
 
 #### 12.1.1 适用场景与原则
 
-- 适用于高频评估、低延迟、强审计要求的核心流程（金融风控、制造设备安全）。
-- 原则：**评估不回源、对象投影就近读取、事件驱动增量更新**。
+- 适用于高频评估、低延迟、强审计场景（如核心风控与设备告警）。
+- 原则：**事件先复制、快照就近读、评估不回源**。
 
-#### 12.1.2 架构逻辑视图（Mermaid）
+#### 12.1.2 架构逻辑视图（修正版）
 
 ```mermaid
 flowchart LR
@@ -645,124 +552,190 @@ flowchart LR
       S1[业务DB / IoT / 业务API]
     end
 
-    subgraph ING[接入与复制]
-      I1[CDC / Event Collector]
-      I2[Message Bus Kafka/Pulsar]
+    subgraph ING[复制与投影]
+      I1[CDC / Collector]
+      I2[(Kafka/Pulsar)]
       I3[Projection Builder]
+      I4[Projection Commit Log]
     end
 
-    subgraph OBJ[对象存储与索引]
+    subgraph OBJ[对象层]
       O1[(Object Projection Store)]
-      O2[(Relation/Graph Index)]
+      O2[(Relation Index)]
     end
 
     subgraph RT[Monitor Runtime]
-      R1[Event Filter]
-      R2[Context Builder]
-      R3[Condition Evaluator]
-      R4[Effect Planner/Executor]
+      R1[Trigger Ingress
+consume Projection Commit Event]
+      R2[Event Filter]
+      R3[Context Builder]
+      R4[Condition Evaluator]
+      R5[Effect Executor]
     end
 
     subgraph GOV[治理与审计]
       G1[(Evaluation Ledger)]
-      G2[(Activity Audit Ledger)]
-      G3[SLI/SLO + Replay]
+      G2[(Activity Ledger)]
+      G3[Replay Worker]
     end
 
     S1 --> I1 --> I2 --> I3
     I3 --> O1
     I3 --> O2
-    I2 --> R1 --> R2 --> R3 --> R4
-    O1 --> R2
-    O2 --> R2
-    R3 --> G1
-    R4 --> G2
+    I3 --> I4 --> R1
+    R1 --> R2 --> R3 --> R4 --> R5
+    O1 --> R3
+    O2 --> R3
+    R4 --> G1
+    R5 --> G2
     G1 --> G3
     G2 --> G3
 ```
 
-#### 12.1.3 机制设计（深入）
+#### 12.1.3 关键机制
 
-1. **触发路径**：`CDC/Event -> Projection Builder -> Object Snapshot -> Evaluation`。
-2. **一致性协议**：`at-least-once event + idempotent projection + watermark`。
-3. **评估上下文构建**：优先读取对象投影快照，关系规则按需读取关系索引，避免高频回源 join。
-4. **状态与恢复**：duration/window 状态进入流式状态存储（checkpoint），支持故障后继续评估。
-5. **审计约束**：每次评估固化 `monitor_version + snapshot_hash + source_watermark`。
+1. **触发来源**：以 `Projection Commit Event` 作为评估触发（保证“已落对象快照”再评估）。
+2. **一致性协议**：`at-least-once + idempotent projection + watermark`。
+3. **输入构建**：Context Builder 优先读对象投影与关系索引，不回源业务库。
+4. **恢复策略**：基于 checkpoint + commit log 重放；回放结果 append 到 ledger。
 
-#### 12.1.4 优势、风险与治理
+---
 
-- 优势：延迟低、稳定性高、回放与取证简单。
-- 风险：复制链路抖动导致数据新鲜度下降。
-- 治理：`freshness_lag_ms` 超阈值时触发降级（暂停高风险动作，仅告警+审计）。
-
-### 12.2 非复制模式（Non-copy/Virtualized）Object Monitor 总体方案设计
+### 12.2 非复制模式（Non-copy/Virtualized）
 
 #### 12.2.1 适用场景与原则
 
-- 适用于数据主权严格、复制受限、跨域数据难以集中落库的场景。
-- 原则：**按需回源 + 快照一致性 + 回源失败补偿**。
+- 适用于数据主权严格、复制受限、跨域数据不便集中落库场景。
+- 原则：**变化信号触发 + 按需回源 + 快照版本留痕 + 延迟补偿**。
 
-#### 12.2.2 架构逻辑视图（Mermaid）
+#### 12.2.2 架构逻辑视图（修正版，补齐触发来源）
 
 ```mermaid
 flowchart LR
     subgraph SRC[外部源系统]
-      S1[业务DB/对象服务]
-      S2[查询API/主数据服务]
+      S1[业务DB CDC]
+      S2[对象服务 Webhook]
+      S3[查询API]
+    end
+
+    subgraph SIG[变化信号层]
+      T1[Change Signal Collector
+CDC/Webhook/Poller]
+      T2[(Trigger Bus)]
+      T3[Trigger Normalizer
+ObjectChangeHint]
     end
 
     subgraph RT[Monitor Runtime]
-      R1[ObjectChangeEvent Trigger]
+      R1[Trigger Ingress]
       R2[Event Filter]
       R3[Input Resolver Adapter]
-      R4[Snapshot Cache]
+      R4[(Snapshot Cache)]
       R5[Context Builder]
       R6[Condition Evaluator]
-      R7[Effect Planner/Executor]
+      R7[Effect Executor]
     end
 
-    subgraph COMP[补偿与可用性]
+    subgraph RES[弹性与补偿]
       C1[Source Health Checker]
-      C2[Delayed Evaluation Queue]
-      C3[Compensation Replayer]
-      C4[Circuit Breaker / Rate Limit]
+      C2[Circuit Breaker / Rate Limit]
+      C3[(Delayed Evaluation Queue)]
+      C4[Compensation Replayer]
     end
 
     subgraph GOV[治理与审计]
       G1[(Evaluation Ledger)]
-      G2[(Activity Audit Ledger)]
+      G2[(Activity Ledger)]
       G3[Source SLA Dashboard]
     end
 
-    R1 --> R2 --> R3
-    R3 --> S1
-    R3 --> S2
-    R3 --> R4 --> R5 --> R6 --> R7
-    C1 --> C4 --> R3
-    C1 --> C2 --> C3 --> R5
+    S1 --> T1
+    S2 --> T1
+    T1 --> T2 --> T3 --> R1
+    R1 --> R2 --> R3 --> R5 --> R6 --> R7
+    R3 --> S3
+    R3 --> R4 --> R5
+    C1 --> C2 --> R3
+    C1 --> C3 --> C4 --> R5
     R6 --> G1
     R7 --> G2
     C1 --> G3
 ```
 
-#### 12.2.3 机制设计（深入）
+#### 12.2.3 关键机制
 
-1. **触发路径**：`ObjectChangeEvent -> Input Resolver Adapter -> Source Pull -> Evaluation`。
-2. **一致性协议**：`snapshot_hash + source_version + delayed compensation`。
-3. **上下文质量控制**：每次回源记录数据来源与版本，必要时标注 `stale_context` 防止误触发高风险动作。
-4. **可用性策略**：短 TTL 缓存、源端熔断、延迟队列与恢复补评估。
-5. **审计约束**：记录回源来源、版本戳、拉取耗时、失败分类与补偿轨迹。
+1. **触发来源明确化**：非复制模式不直接依赖对象库事件，触发来自 `Change Signal Collector`（CDC/Webhook/Poller）。
+2. **触发语义**：进入 runtime 的是 `ObjectChangeHint`（对象主键+变化字段+时间戳），不是完整快照。
+3. **上下文构建**：由 `Input Resolver Adapter` 按规则输入声明回源拉取，并写入短 TTL 缓存。
+4. **一致性协议**：每次求值落 `snapshot_hash + source_version + pull_time`，并可标记 `stale_context`。
+5. **补偿机制**：源端异常或超时进入 `Delayed Evaluation Queue`，恢复后补评估并追加 activity。
 
-#### 12.2.4 优势、风险与治理
-
-- 优势：合规友好、降低复制存储成本。
-- 风险：上游源系统 SLA 抖动影响评估时效与稳定性。
-- 治理：按规则等级设策略，P1/P2 规则建议强制热缓存或切换半复制模式。
+---
 
 ### 12.3 混合模式（Hybrid，推荐默认）
 
-- 高频字段与关键对象走复制热投影。
-- 低频大字段与长尾对象按需虚拟化回源。
-- 选择策略：P1/P2 优先复制；P3/P4 可回源；支持按租户/规则动态切换。
+#### 12.3.1 策略
+
+- 高频、强时效字段走复制投影；低频、长尾字段走回源。
+- 按规则等级切换：P1/P2 默认复制，P3/P4 可非复制。
+- 支持按租户/规则动态迁移（Non-copy -> Hybrid -> Copy）。
+
+#### 12.3.2 选型建议
+
+- 首期默认 Hybrid：以复制模式承载核心告警路径，以非复制模式承载长尾查询。
+- 所有模式共用同一 DSL/Plan/审计模型，避免多套语义。
+
+---
+
+
+## 13. 分阶段实施计划（落地版）
+
+> 本章放在文档最后，作为执行清单；Phase 1 仅保留首批必须落地的复制模式核心能力。
+
+### Phase 1（优先落地：复制模式核心能力，6~8 周）
+
+**目标**：先跑通“复制模式下 Object Monitor 最小闭环”，满足首批可用。
+
+1. **Monitor 定义与管理（含 DSL）**
+   - 提供 monitor 的创建/更新/发布/暂停能力。
+   - 落地 DSL 五段式最小子集：`scope/input/condition/effects/policy`。
+   - 编译输出最小 plan：`ConditionPlan/EffectPlan/FieldDependencyIndex`。
+
+2. **对象实例数据后端（Neo4j）**
+   - 当前本体实例数据存储后端采用 **Neo4j**。
+   - 复制模式下由投影链路把变更写入 Neo4j，并提供 Runtime 读取接口。
+   - 优先支持“主对象 + 一跳关系”读取，控制上下文构建复杂度。
+
+3. **Runtime MVP（复制模式）**
+   - 实现 `Event Filter / Context Builder / Evaluator / Activity` 主链路。
+   - 触发源采用 `Projection Commit Event`，保证“先落快照再评估”。
+
+4. **执行能力（先 Action，后扩展）**
+   - Evaluator 命中后仅执行 **Action**。
+   - Action 通过 **REST API** 调用外部系统，带幂等键与重试。
+   - 本阶段暂不支持 Notification（Email/Webhook 等）。
+
+5. **验收门槛（Phase 1）**
+   - 复制模式端到端链路可跑通（定义 -> 编译 -> 发布 -> 评估 -> Action -> Activity）。
+   - 关键审计字段可追溯：`monitor_version + plan_hash + snapshot_hash`。
+   - 基础可观测可用：评估延迟、Action 成功率、失败重试次数。
+
+### Phase 2（8~12 周）
+
+1. 管控面增强：版本回滚、手动执行、基础配额与复杂度门禁。
+2. Runtime 增强：回放入口、DLQ、失败补偿、去重与冷却策略。
+3. 扩展 effect 类型：notification/function/logic/fallback。
+4. 非复制模式能力：Change Signal Collector、Input Resolver、延迟补偿链路。
+5. 混合模式调度：按规则等级与租户策略在 copy/non-copy 间切换。
+6. 多租户治理：配额、隔离、限流与成本画像。
+
+### Phase 3（持续演进）
+
+1. 可观测增强：仪表盘与告警规则（延迟、失败率、堆积）。
+2. 交付增强：运维脚本、部署模板、故障演练手册。
+3. 行业模板（金融风控、制造设备健康）。
+4. 规则推荐与冲突检测。
+5. 成本优化（冷热分层、状态压缩、弹性扩缩容）。
+6. 稳定性提升（跨机房容灾、灰度发布自动化、容量预测）。
 
 ---
