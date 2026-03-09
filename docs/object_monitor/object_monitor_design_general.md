@@ -406,7 +406,7 @@ Filter/Builder/Evaluator/Effect]
 - 适用于高频评估、低延迟、强审计场景（如核心风控与设备告警）。
 - 原则：**源端变更先实例化入本体图存储，再以对象变化事件触发评估；评估主链路不回源业务库**。
 
-#### 8.1.2 架构逻辑视图（优化版）
+#### 8.1.2 架构逻辑视图（修订版：统一变更捕获）
 
 ```mermaid
 flowchart LR
@@ -417,17 +417,22 @@ flowchart LR
     subgraph ING[采集与实例化]
       I1[CDC / Collector]
       I2[(Kafka/Pulsar)]
-      I3[Ontology Instantiation Writer
-按本体定义构建 node/relation]
-      I4[(Object Change Outbox)]
+      I3[Ontology Projection Writer
+按本体定义 upsert node/relation]
     end
 
-    subgraph OBJ[本体对象层]
+    subgraph OBJ[本体对象层 / 变更采集]
+      O0[Graph Mutation API
+所有业务写入统一入口]
       O1[(Neo4j Object Graph Store)]
+      O2[Graph Change Capture
+tx-log/CDC]
+      O3[(Object Change Outbox)]
     end
 
     subgraph EVT[对象事件层]
-      E1[Object Change Event Publisher]
+      E1[Object Change Event Publisher
+Outbox -> Event]
       E2[(ObjectChangeEvent Bus)]
     end
 
@@ -447,9 +452,9 @@ consume ObjectChangeEvent]
       G3[Replay Worker]
     end
 
-    S1 --> I1 --> I2 --> I3
-    I3 --> O1
-    I3 --> I4 --> E1 --> E2 --> R1
+    S1 --> I1 --> I2 --> I3 --> O0 --> O1
+    O1 --> O2 --> O3 --> E1 --> E2 --> R1
+    S1 -. 用户操作/应用写请求 .-> O0
     R1 --> R2 --> R3 --> R4 --> R5
     O1 --> R3
     R4 --> G1
@@ -460,11 +465,26 @@ consume ObjectChangeEvent]
 
 #### 8.1.3 关键机制（深入说明）
 
-1. 源系统变化先写 Neo4j，再发布 `ObjectChangeEvent`。
-2. `Projection Builder` 建议命名为 `Ontology Instantiation Writer`。
-3. `Projection Commit Log` 建议命名为 `Object Change Outbox`。
-4. 一致性建议：`at-least-once + idempotent instantiation + ordered-by-object partition`。
-5. Replay 优先回放 `ObjectChangeEvent`，结果 append 到 ledger。
+1. `Ontology Projection Writer` 的职责是“将外部变化投影为本体对象变更”，本质是投影写入器，不负责事件语义裁剪。
+2. `Graph Mutation API` 是强约束组件：业务侧对 Neo4j 的写入必须走该入口（避免绕过事件捕获链路）。
+3. `Object Change Outbox` 的唯一职责是承接“已提交图变更”的事实，再异步发布 `ObjectChangeEvent`。
+4. 对“直写 Neo4j”的兜底：启用 `Graph Change Capture(tx-log/CDC)` 捕获提交后的变更并写入 outbox，保证不漏事件。
+5. 一致性建议：`at-least-once + idempotent upsert + ordered-by-object partition + outbox relay exactly-once to bus`。
+6. Replay 优先回放 `ObjectChangeEvent`，结果 append 到 ledger。
+
+#### 8.1.4 针对“修改 Neo4j 节点属性是否会漏事件”的结论
+
+- 若允许应用直接连接 Neo4j 并写入，且没有 tx-log/CDC 捕获，则**会漏掉** `ObjectChangeEvent`，你的担心是成立的。
+- 修订后的架构通过“两道防线”避免漏采：
+  1. **主路径**：所有写入经 `Graph Mutation API`，同事务写图并写 outbox；
+  2. **兜底路径**：`Graph Change Capture` 从已提交事务日志补采，写入 outbox。
+- 因此事件触发不再依赖 `Ontology Projection Writer` 单点，用户操作导致的图变更也可进入 Monitor Runtime。
+
+#### 8.1.5 组件命名澄清（避免歧义）
+
+- 不建议继续使用 `Ontology Instantiation Writer`：该命名容易让人误解为“只在初始化/建模阶段生效”。
+- 建议统一为 `Ontology Projection Writer`：强调它是把多源数据持续投影到本体对象层的运行时组件。
+- `Object Change Outbox` 应被视为“对象变更事实日志”，而非“仅由某个 writer 产生”的附属队列。
 
 ---
 
