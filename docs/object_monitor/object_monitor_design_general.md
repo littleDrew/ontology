@@ -640,7 +640,7 @@ ObjectChangeHint]
     subgraph SF[Signal Fetcher Cluster]
       F1[Input Resolver Adapter]
       F2[(Snapshot Cache TTL)]
-      F3[Fat Event Builder(stale_flag)]
+      F3[Fat Event Builder<br/>stale_flag]
     end
 
     subgraph RES[弹性与补偿]
