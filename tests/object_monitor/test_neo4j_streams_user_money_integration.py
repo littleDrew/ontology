@@ -149,7 +149,7 @@ def _runtime_neo4j_credentials():
     _best_effort_stop_neo4j(neo4j_bin, neo4j_root, env)
     start = subprocess.run([str(neo4j_bin), "start"], check=False, cwd=neo4j_root, env=env, capture_output=True, text=True)
     if start.returncode != 0 and "already running" not in ((start.stdout or "") + (start.stderr or "")):
-        raise RuntimeError(f"Failed to start Neo4j: {(start.stdout or "").strip()} {(start.stderr or "").strip()}")
+        raise RuntimeError(f"Failed to start Neo4j: {(start.stdout or '').strip()} {(start.stderr or '').strip()}")
 
     uri = "bolt://127.0.0.1:17687"
     user = "neo4j"
