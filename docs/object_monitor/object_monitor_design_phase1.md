@@ -85,17 +85,16 @@ graph LR
       N2[Ontology Write Path
 Instance/Action Apply]
       N3[Neo4j Streams Plugin<br/>Community 主推荐]
-      N31[APOC Trigger
-(Streams 不可用时)]
+      N31[APOC Trigger<br/>Streams 不可用时]
       N32[Reconcile Scanner
-(updated_at watermark)]
+updated_at watermark]
       N4[Tx Outbox Publisher]
     end
 
     subgraph DP[Data Plane]
       B1[(Kafka: object_change_raw)]
       B11[Change Normalizer & Dedupe
-(unified envelope)]
+unified envelope]
       B2[Context Builder Worker
 formerly Materialize Worker]
       B3[(Context KV Store)]
