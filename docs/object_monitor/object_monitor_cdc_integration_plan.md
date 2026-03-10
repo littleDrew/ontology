@@ -358,10 +358,20 @@ Community 下删除最容易丢失，建议二选一：
 - 用例目标：验证 `User.money` 从 50 更新到 150 后，Monitor 命中 `money > 100`，并触发 Action 将 `User.tag` 从 `poor` 更新为 `rich`。
 - 集成测试：`tests/object_monitor/test_neo4j_streams_user_money_integration.py`。
 - 组件测试：`tests/object_monitor/test_streams_connector.py`（Streams 消息映射）。
+- 安装依赖（本仓库测试基线）：
+
+```bash
+apt-get update -y && apt-get install -y openjdk-11-jre-headless
+mkdir -p .cache/neo4j-test
+curl -fL "https://dist.neo4j.org/neo4j-community-4.4.48-unix.tar.gz" -o .cache/neo4j-test/neo4j-community-4.4.48-unix.tar.gz
+tar -xzf .cache/neo4j-test/neo4j-community-4.4.48-unix.tar.gz -C .cache/neo4j-test
+curl -fL "https://github.com/neo4j-contrib/neo4j-streams/releases/download/4.1.9/neo4j-streams-4.1.9.jar" -o .cache/neo4j-test/neo4j-streams-4.1.9.jar
+cp .cache/neo4j-test/neo4j-streams-4.1.9.jar .cache/neo4j-test/neo4j-community-4.4.48/plugins/
+```
+
+- 说明：`test_neo4j_streams_user_money_integration.py` 已内置本地自举逻辑。若未设置 `NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD`，测试会自动拉起 Neo4j Community 4.4.48 并安装 Streams 4.1.9 插件后再执行，不再以 `skip` 跳过。
 - 运行命令：
 
 ```bash
 pytest -q tests/object_monitor/test_streams_connector.py tests/object_monitor/test_neo4j_streams_user_money_integration.py
 ```
-
-说明：集成测试依赖可访问 Neo4j（`NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD`），缺失时会自动 `skip`。
