@@ -1,0 +1,2 @@
+# Test-time runtime dependencies that are not guaranteed in minimal environments.
+sqlalchemy>=2,<3

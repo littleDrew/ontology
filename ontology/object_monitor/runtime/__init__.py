@@ -1,5 +1,6 @@
 from .action_dispatcher import ActionDispatcher, ActionGateway, ActionGatewayResponse
 from .action_gateway_adapter import OntologyActionApiAdapter
+from .change_pipeline import DualChannelIngestionPipeline, InMemoryRawEventBus, Neo4jCdcMapper, PipelineResult
 from .context_builder import ContextBuilder, ContextSnapshot, InMemoryContextStore
 from .event_filter import EventFilter, MonitorRuntimeSpec
 from .evaluator import EvaluatorConfig, L1Evaluator
@@ -14,6 +15,10 @@ __all__ = [
     "ActionGatewayResponse",
     "InMemoryReconcileQueue",
     "OntologyActionApiAdapter",
+    "DualChannelIngestionPipeline",
+    "InMemoryRawEventBus",
+    "Neo4jCdcMapper",
+    "PipelineResult",
     "ContextBuilder",
     "ContextSnapshot",
     "InMemoryContextStore",

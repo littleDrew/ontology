@@ -827,3 +827,44 @@ graph TD
    - Context Builder 的重试与恢复策略工程化；
    - 为 Phase 2（L2/Replay）补充回放驱动器。
 
+
+## 17. CDC + Outbox 双通道实现细化（代码落地版）
+
+> 本节补充“如何在当前 Python 仓库里把双通道真正打通到可执行代码”，用于指导 Phase 1 的工程实现与验收。
+
+### 17.1 落地组件清单
+
+1. **Outbox 持久化（关系型数据库，SQLAlchemy）**
+   - 表：`object_monitor_change_outbox`。
+   - 字段：`event_id`（唯一）、`payload(JSON)`、`source`、`status(pending/published)`、`created_at`、`published_at`。
+   - 实现：`SqlAlchemyChangeOutboxRepository`。
+
+2. **CDC 映射器（Neo4j CDC -> Trigger Envelope）**
+   - 实现：`Neo4jCdcMapper.from_cdc_payload`。
+   - 输入：CDC 事务行（`txId/tenantId/label/primaryKey/objectVersion/changedFields/eventTime`）。
+   - 输出：统一 `ObjectChangeEvent(change_source='neo4j_cdc')`。
+
+3. **双通道归并流水线**
+   - 实现：`DualChannelIngestionPipeline`。
+   - 输入：`outbox_events + cdc_events`。
+   - 处理：先写 raw sink，再经 `ChangeNormalizer` 去重/版本回退分流。
+   - 输出：`PipelineResult(normalized_events, deduped_count, reconcile_events)`。
+
+### 17.2 端到端执行顺序（实现层）
+
+1. **应用写路径**：`Instance/Action` 成功写 Neo4j 后，将标准 `ObjectChangeEvent` 写入 outbox 表（状态 `pending`）。
+2. **Outbox Relay**：轮询 `pending` 事件，标记为 `published`，送入双通道流水线。
+3. **CDC Connector**：读取 Neo4j CDC 记录，经 `Neo4jCdcMapper` 映射后送入双通道流水线。
+4. **Normalize & Dedupe**：
+   - 同版本双发（Outbox+CDC）只保留一条；
+   - 版本回退写入 `reconcile_events`。
+5. **Runtime 主链路**：`ContextBuilder -> EventFilter -> L1Evaluator -> ActionDispatcher`。
+6. **Ledger 持久化**：`Evaluation/Activity/DeliveryLog` 统一写 SQLAlchemy Ledger（可挂 MySQL/SQLite）。
+
+### 17.3 验收测试建议
+
+1. **双发去重测试**：同对象同版本 outbox+cdc 输入，断言仅 1 条 normalized。
+2. **版本回退测试**：先送 v9 再送 v8，断言进入 reconcile。
+3. **E2E 命中测试**：normalized 事件进入评估链路后，命中规则并写入 Evaluation/Activity。
+4. **数据库切换测试**：同一套 SQLAlchemy 代码在 SQLite 与 MySQL URL 下可运行（MySQL 用 smoke/CI 环境变量门控）。
+
