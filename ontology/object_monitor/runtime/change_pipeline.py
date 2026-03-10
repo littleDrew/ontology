@@ -84,6 +84,9 @@ class DualChannelIngestionPipeline:
                 idx = index_by_key.get(key)
                 if idx is not None and event.changed_properties:
                     existing = normalized[idx]
+                    merged_props = {
+                        item.field: item for item in [*existing.changed_properties, *event.changed_properties]
+                    }
                     normalized[idx] = ObjectChangeEvent(
                         event_id=existing.event_id,
                         tenant_id=existing.tenant_id,
@@ -95,7 +98,7 @@ class DualChannelIngestionPipeline:
                         event_time=existing.event_time,
                         trace_id=existing.trace_id,
                         change_source=existing.change_source,
-                        changed_properties=sorted(event.changed_properties, key=lambda c: c.field),
+                        changed_properties=[merged_props[field] for field in sorted(merged_props.keys())],
                     )
             if result.event is not None:
                 index_by_key[key] = len(normalized)

@@ -214,7 +214,7 @@ Flink CEP & Window]
 
     S1 --> S2 --> P1 --> P2
     P2 --> P3
-    P2 -->|Context Event (Fat, Selective, Pointer)| R1
+    P2 -->|"Context Event: Fat / Selective / Pointer"| R1
     R1 --> R2 --> R4
     R1 --> R3 --> R4
     R4 --> R5

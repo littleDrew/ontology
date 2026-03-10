@@ -115,3 +115,44 @@ def test_neo4j_cdc_mapper_supports_before_after_payload() -> None:
         PropertyChange(field="status", old_value="IDLE", new_value="RUNNING"),
         PropertyChange(field="temperature", old_value=70, new_value=71),
     ]
+
+
+def test_dual_channel_pipeline_merges_deduped_property_changes_from_both_channels() -> None:
+    now = datetime(2026, 2, 2, 9, 10, 0)
+    outbox_event = ObjectChangeEvent(
+        event_id="ev-out-merge",
+        tenant_id="t1",
+        object_type="Device",
+        object_id="D3",
+        source_version=110,
+        object_version=9,
+        changed_fields=["temperature"],
+        event_time=now,
+        trace_id="tr-out-merge",
+        change_source="outbox",
+        changed_properties=[PropertyChange(field="temperature", old_value=70, new_value=85)],
+    )
+    cdc_event = ObjectChangeEvent(
+        event_id="ev-cdc-merge",
+        tenant_id="t1",
+        object_type="Device",
+        object_id="D3",
+        source_version=110,
+        object_version=9,
+        changed_fields=["status"],
+        event_time=now,
+        trace_id="tr-cdc-merge",
+        change_source="neo4j_cdc",
+        changed_properties=[PropertyChange(field="status", old_value="IDLE", new_value="RUNNING")],
+    )
+
+    pipeline = DualChannelIngestionPipeline(ChangeNormalizer(dedupe_window_seconds=60))
+    result = pipeline.ingest([outbox_event], [cdc_event])
+
+    assert len(result.normalized_events) == 1
+    assert result.deduped_count == 1
+    assert result.normalized_events[0].changed_fields == ["status", "temperature"]
+    assert result.normalized_events[0].changed_properties == [
+        PropertyChange(field="status", old_value="IDLE", new_value="RUNNING"),
+        PropertyChange(field="temperature", old_value=70, new_value=85),
+    ]
