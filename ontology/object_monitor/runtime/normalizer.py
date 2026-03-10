@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Tuple
 
-from ontology.object_monitor.api.contracts import ObjectChangeEvent, ReconcileEvent
+from ontology.object_monitor.api.contracts import ObjectChangeEvent, PropertyChange, ReconcileEvent
 
 
 @dataclass(frozen=True)
@@ -43,6 +43,8 @@ class ChangeNormalizer:
             )
             return NormalizationOutput(event=None, deduped=False, reconcile_event=reconcile)
 
+        normalized_properties = self._normalize_properties(raw_event.changed_properties)
+        normalized_fields = sorted(set(raw_event.changed_fields + [item.field for item in normalized_properties]))
         normalized = ObjectChangeEvent(
             event_id=raw_event.event_id,
             tenant_id=raw_event.tenant_id,
@@ -50,10 +52,11 @@ class ChangeNormalizer:
             object_id=raw_event.object_id,
             source_version=raw_event.source_version,
             object_version=raw_event.object_version,
-            changed_fields=sorted(set(raw_event.changed_fields)),
+            changed_fields=normalized_fields,
             event_time=raw_event.event_time,
             trace_id=raw_event.trace_id,
             change_source=raw_event.change_source,
+            changed_properties=normalized_properties,
         )
         self._recent_versions[dedupe_key] = event_time
         self._latest_object_version[obj_key] = raw_event.object_version
@@ -70,3 +73,11 @@ class ChangeNormalizer:
         expired = [key for key, ts in self._recent_versions.items() if now - ts > self._dedupe_window]
         for key in expired:
             del self._recent_versions[key]
+
+
+    def _normalize_properties(self, properties: list[PropertyChange]) -> list[PropertyChange]:
+        """Deduplicate property changes by field and keep deterministic field order."""
+        latest_by_field: dict[str, PropertyChange] = {}
+        for item in properties:
+            latest_by_field[item.field] = item
+        return [latest_by_field[field] for field in sorted(latest_by_field.keys())]

@@ -1,6 +1,8 @@
 from .action_dispatcher import ActionDispatcher, ActionGateway, ActionGatewayResponse
 from .action_gateway_adapter import OntologyActionApiAdapter
+from .cdc_connector import KafkaConnectClient, Neo4jKafkaCdcEventMapper, Neo4jKafkaSourceConfig
 from .change_pipeline import DualChannelIngestionPipeline, InMemoryRawEventBus, Neo4jCdcMapper, PipelineResult
+from .kafka_cdc_ingestor import KafkaCdcIngestor
 from .context_builder import ContextBuilder, ContextSnapshot, InMemoryContextStore
 from .event_filter import EventFilter, MonitorRuntimeSpec
 from .evaluator import EvaluatorConfig, L1Evaluator
@@ -15,7 +17,11 @@ __all__ = [
     "ActionGatewayResponse",
     "InMemoryReconcileQueue",
     "OntologyActionApiAdapter",
+    "KafkaConnectClient",
+    "Neo4jKafkaCdcEventMapper",
+    "Neo4jKafkaSourceConfig",
     "DualChannelIngestionPipeline",
+    "KafkaCdcIngestor",
     "InMemoryRawEventBus",
     "Neo4jCdcMapper",
     "PipelineResult",

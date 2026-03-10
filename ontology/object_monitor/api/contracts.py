@@ -18,6 +18,13 @@ class MonitorVersionStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class PropertyChange:
+    field: str
+    old_value: Any
+    new_value: Any
+
+
+@dataclass(frozen=True)
 class ObjectChangeEvent:
     event_id: str
     tenant_id: str
@@ -29,6 +36,7 @@ class ObjectChangeEvent:
     event_time: datetime
     trace_id: str
     change_source: str = "outbox"
+    changed_properties: List[PropertyChange] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
