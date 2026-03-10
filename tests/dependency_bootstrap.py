@@ -1,8 +1,7 @@
-"""Utilities for auto-installing lightweight test dependencies.
+"""Utilities for auto-installing lightweight project/test dependencies.
 
-This module is intentionally imported from test `conftest.py` files so a plain
-`pytest` run can bootstrap required packages (for example SQLAlchemy) in
-minimal environments.
+This module is imported from test `conftest.py` so a plain `pytest` run can
+bootstrap common dependencies in minimal environments.
 """
 
 from __future__ import annotations
@@ -15,7 +14,12 @@ from typing import Iterable
 
 
 _REQUIRED_PACKAGES: tuple[tuple[str, str], ...] = (
+    ("fastapi", "fastapi>=0.110,<1"),
+    ("pydantic", "pydantic>=2,<3"),
     ("sqlalchemy", "sqlalchemy>=2,<3"),
+    ("httpx", "httpx>=0.27,<1"),
+    ("neo4j", "neo4j>=5,<6"),
+    ("pymysql", "pymysql>=1,<2"),
 )
 
 

@@ -59,7 +59,7 @@ ontology/
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install fastapi uvicorn sqlalchemy pytest httpx
+pip install -r requirement.txt
 ```
 
 如需 Neo4j：
@@ -114,11 +114,17 @@ http://localhost:8765/openapi.json
 pytest -q
 ```
 
-### 测试依赖自动安装（SQLAlchemy）
+### 依赖安装与测试自动补全
 
-为避免在最小环境中出现 `ModuleNotFoundError: sqlalchemy`，仓库新增了：
+建议先执行：
 
-- `requirements-test.txt`：集中声明测试依赖；
+```bash
+pip install -r requirement.txt
+```
+
+为避免在最小环境中出现依赖缺失（例如 `sqlalchemy`），仓库提供了：
+
+- `requirement.txt`：集中声明运行与测试依赖；
 - `tests/action/conftest.py` 与 `tests/object_monitor/conftest.py`：在 pytest 启动时自动检测并安装缺失依赖（默认开启）。
 
 如需关闭自动安装（例如离线环境）：
