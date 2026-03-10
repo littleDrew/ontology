@@ -59,7 +59,7 @@ ontology/
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -r requirement.txt
+pip install -r requirements.txt
 ```
 
 如需 Neo4j：
@@ -119,12 +119,12 @@ pytest -q
 建议先执行：
 
 ```bash
-pip install -r requirement.txt
+pip install -r requirements.txt
 ```
 
 为避免在最小环境中出现依赖缺失（例如 `sqlalchemy`），仓库提供了：
 
-- `requirement.txt`：集中声明运行与测试依赖；
+- `requirements.txt`：集中声明运行与测试依赖；
 - `tests/action/conftest.py` 与 `tests/object_monitor/conftest.py`：在 pytest 启动时自动检测并安装缺失依赖（默认开启）。
 
 如需关闭自动安装（例如离线环境）：
