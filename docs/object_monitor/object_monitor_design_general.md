@@ -192,29 +192,29 @@ sequenceDiagram
 ```mermaid
 graph TD
     subgraph Storage[Ontology Persistent Layer]
-      S1[(Graph/Relational Store)]
+      S1[(Graph & Relational Store)]
       S2[MVCC & Tx Log]
     end
 
     subgraph Prep[Context Materialization]
       P1[CDC/Outbox Relay]
       P2[Materialize Worker]
-      P3[(Context KV: Redis/RocksDB)]
+      P3[(Context KV: Redis & RocksDB)]
     end
 
     subgraph Runtime[Monitor Runtime]
       R1[Kafka Context Event Topic]
       R2[L1 Stateless Evaluator
-CEL/Threshold]
+CEL & Threshold]
       R3[L2 Stateful Evaluator
-Flink CEP/Window]
+Flink CEP & Window]
       R4[Effect Dispatcher]
       R5[Retry Topics + DLQ]
     end
 
     S1 --> S2 --> P1 --> P2
     P2 --> P3
-    P2 -->|Context Event (Fat/Selective/Pointer)| R1
+    P2 -->|Context Event (Fat, Selective, Pointer)| R1
     R1 --> R2 --> R4
     R1 --> R3 --> R4
     R4 --> R5
