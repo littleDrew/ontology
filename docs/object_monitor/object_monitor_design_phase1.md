@@ -84,8 +84,7 @@ graph LR
       N1[(Neo4j Graph Store)]
       N2[Ontology Write Path
 Instance/Action Apply]
-      N3[Neo4j Streams Plugin
-(Community 主推荐)]
+      N3[Neo4j Streams Plugin<br/>Community 主推荐]
       N31[APOC Trigger
 (Streams 不可用时)]
       N32[Reconcile Scanner
