@@ -14,6 +14,7 @@ from .compiler.dsl import DSLValidationError, ValidationContext, parse_monitor_d
 from .compiler.service import build_monitor_artifact
 from .runtime.action_dispatcher import ActionDispatcher, ActionGateway, ActionGatewayResponse
 from .runtime.action_gateway_adapter import OntologyActionApiAdapter
+from .runtime.change_pipeline import DualChannelIngestionPipeline, InMemoryRawEventBus, Neo4jCdcMapper, PipelineResult
 from .runtime.context_builder import ContextBuilder, ContextSnapshot, InMemoryContextStore
 from .runtime.event_filter import EventFilter, MonitorRuntimeSpec
 from .runtime.evaluator import EvaluatorConfig, L1Evaluator
@@ -40,8 +41,16 @@ __all__ = [
     "ActionDispatcher",
     "SqliteEvaluationLedger",
     "SqliteActivityLedger",
+    "SqlAlchemyEvaluationLedger",
+    "SqlAlchemyActivityLedger",
+    "SqlAlchemyMonitorReleaseService",
+    "SqlAlchemyChangeOutboxRepository",
     "InMemoryReconcileQueue",
     "OntologyActionApiAdapter",
+    "DualChannelIngestionPipeline",
+    "InMemoryRawEventBus",
+    "Neo4jCdcMapper",
+    "PipelineResult",
     "build_monitor_artifact",
     "ContextBuilder",
     "ContextSnapshot",
@@ -69,3 +78,4 @@ from .storage.repository import EvaluationQuery, InMemoryEvaluationLedger
 from .storage.activity_repository import ActivityQuery, InMemoryActivityLedger
 
 from .storage.sqlite_repository import SqliteActivityLedger, SqliteEvaluationLedger
+from .storage.sqlalchemy_repository import SqlAlchemyActivityLedger, SqlAlchemyChangeOutboxRepository, SqlAlchemyEvaluationLedger, SqlAlchemyMonitorReleaseService

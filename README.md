@@ -59,7 +59,7 @@ ontology/
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install fastapi uvicorn sqlalchemy pytest httpx
+pip install -r requirements.txt
 ```
 
 如需 Neo4j：
@@ -114,6 +114,26 @@ http://localhost:8765/openapi.json
 pytest -q
 ```
 
+### 依赖安装与测试自动补全
+
+建议先执行：
+
+```bash
+pip install -r requirements.txt
+```
+
+为避免在最小环境中出现依赖缺失（例如 `sqlalchemy`），仓库提供了：
+
+- `requirements.txt`：集中声明运行与测试依赖；
+- `tests/action/conftest.py` 与 `tests/object_monitor/conftest.py`：在 pytest 启动时自动检测并安装缺失依赖（默认开启）。
+
+如需关闭自动安装（例如离线环境）：
+
+```bash
+export ONTOLOGY_AUTO_INSTALL_TEST_DEPS=0
+```
+
+
 ### MySQL 持久化存储测试说明
 
 仓库中的 `SqlActionRepository` 基于 SQLAlchemy，可通过 `MYSQL_TEST_URL` 对接 MySQL 执行 smoke 测试。
@@ -135,14 +155,14 @@ mysql -uroot -e "CREATE DATABASE IF NOT EXISTS ontology_test;"
 
 ```bash
 export MYSQL_TEST_URL='mysql+pymysql://root@127.0.0.1:3306/ontology_test'
-pytest -q tests/test_sql_repository_mysql.py
+pytest -q tests/action/test_sql_repository_mysql.py
 ```
 
 > 未设置 `MYSQL_TEST_URL` 时，该用例会自动 `skip`。
 
 ### Neo4j 集成测试说明
 
-`tests/test_action_flow.py::test_action_function_applies_edits_to_neo4j` 依赖外部 Neo4j 实例。  
+`tests/action/test_action_flow.py::test_action_function_applies_edits_to_neo4j` 依赖外部 Neo4j 实例。  
 若未设置以下环境变量，测试会自动 `skip`：
 
 ```bash

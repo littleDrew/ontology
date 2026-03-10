@@ -17,6 +17,7 @@ from ontology.object_monitor.compiler.service import build_monitor_artifact
 
 @dataclass
 class _MonitorVersionBundle:
+    """In-memory aggregate of definition, artifact and release metadata."""
     definition: MonitorDefinition
     artifact: MonitorArtifact
     record: MonitorVersionRecord
@@ -37,6 +38,7 @@ class InMemoryMonitorReleaseService:
         limits: Dict[str, Any] | None = None,
         now: datetime | None = None,
     ) -> MonitorVersionRecord:
+        """Validate a monitor payload and store a new draft version."""
         parsed = parse_monitor_definition(payload)
         validate_monitor_definition(parsed, ValidationContext(available_fields=available_fields))
         now = now or datetime.utcnow()
@@ -57,6 +59,7 @@ class InMemoryMonitorReleaseService:
         return record
 
     def publish(self, monitor_id: str, monitor_version: int, *, operator: str, now: datetime | None = None) -> MonitorVersionRecord:
+        """Activate a target version and archive any previously active version."""
         now = now or datetime.utcnow()
         bundle = self._require_bundle(monitor_id, monitor_version)
         for version, stored in self._by_monitor[monitor_id].items():
@@ -77,6 +80,7 @@ class InMemoryMonitorReleaseService:
         return bundle.record
 
     def rollback(self, monitor_id: str, target_version: int, *, operator: str, now: datetime | None = None) -> MonitorVersionRecord:
+        """Clone a historical version into a new active rollback version."""
         now = now or datetime.utcnow()
         target = self._require_bundle(monitor_id, target_version)
         versions = self._by_monitor[monitor_id]
@@ -113,6 +117,7 @@ class InMemoryMonitorReleaseService:
         return record
 
     def get_active_artifact(self, monitor_id: str) -> MonitorArtifact:
+        """Return the currently active artifact for a monitor id."""
         versions = self._by_monitor.get(monitor_id, {})
         for bundle in versions.values():
             if bundle.record.status is MonitorVersionStatus.active:
@@ -120,6 +125,7 @@ class InMemoryMonitorReleaseService:
         raise KeyError(f"no active version for monitor: {monitor_id}")
 
     def _require_bundle(self, monitor_id: str, monitor_version: int) -> _MonitorVersionBundle:
+        """Load a specific version bundle or raise a descriptive KeyError."""
         try:
             return self._by_monitor[monitor_id][monitor_version]
         except KeyError as exc:
