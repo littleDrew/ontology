@@ -2,11 +2,29 @@
 
 ## 1. 结论（先回答你的核心问题）
 
-**建议在 Phase 1 集成 Neo4j Kafka Connector（CDC strategy）**，并且把它定位为：
+**Phase 1 需要按 Neo4j 版本分层集成**：
 
-- `Outbox` 的并行兜底通道，专门覆盖“直写 Neo4j / 外部同步写入 Neo4j”场景；
+- Neo4j Enterprise/Aura：使用 Neo4j Kafka Connector（CDC strategy）；
+- Neo4j Community 4.4.48：不具备 `db.cdc.*` 与 CDC connector 路径，优先 `Outbox + Neo4j Streams + Reconcile`，次选 `Outbox + APOC Trigger + Reconcile`；
+
+并统一定位为：
+
+- `Outbox` 的并行兜底通道，覆盖“直写 Neo4j / 外部同步写入 Neo4j”场景；
 - 与现有 `object_change_raw -> normalize/dedupe -> object_change` 流水线统一汇流；
 - 在归一化层做幂等去重，避免 outbox+cdc 双发导致重复动作。
+
+
+## 1.1 你当前环境（Neo4j Community 4.4.48）的关键结论
+
+你当前判断是正确的：**Neo4j Community 4.4.48 无法按本方案直接使用 Neo4j CDC Connector**。
+
+原因：
+
+1. 现有 connector 的 CDC strategy 依赖 `db.cdc.current / db.cdc.query` 相关能力；
+2. 该能力在 Community 4.4.48 不可用；
+3. 仓库内 `test_neo4j_cdc_capture_integration.py` 已对该能力缺失做 `skip` 分支。
+
+因此，Phase 1 不能把“CDC connector 可用”作为前置条件，必须提供 Community 可落地路径。
 
 ## 2. 当前仓库补齐内容
 
@@ -259,3 +277,91 @@ pytest -q tests/object_monitor/test_neo4j_cdc_capture_integration.py
 - **问题：收到 CDC 但 object_id 解析为空**
   - 确认 `object_id_field` 与图中主键属性一致（例如 `device_id`）。
 
+
+
+
+## 9. Neo4j Community 4.4.48 的 Phase 1 可落地实现（替代 CDC Connector）
+
+### 9.1 目标重述
+
+在不升级 Neo4j 版本的前提下，完成对象变更捕获（创建、修改、删除）并打通到 `object_change_raw -> normalize/dedupe -> object_change`。
+
+### 9.2 分层方案
+
+1. **L0（必须）Outbox 主通道**
+   - 所有通过 ontology 服务层的对象写入，事务提交后发布 raw 事件；
+   - 事件必须带 `op_type`（create/update/delete）与 `object_version`。
+
+2. **L1（推荐）Neo4j Streams 直写兜底**
+   - 覆盖外部脚本或人工直接写库；
+   - 通过 Streams 将节点/关系变更推送到 Kafka，再映射到统一 Trigger Envelope。
+
+3. **L1-B（次选）APOC Trigger 轻触发**
+   - 当 Streams 不可用或运维成本不可接受时启用；
+   - Trigger 仅提取最小 envelope 并投递，不做复杂逻辑。
+
+4. **L2（必须）Reconcile Scanner 最终一致补偿**
+   - 周期扫描 `updated_at` 水位线，生成 upsert 事件；
+   - 删除通过 tombstone 表或 delete_audit 表补齐。
+
+### 9.3 Neo4j Streams vs APOC Trigger（Community 4.4）
+
+| 维度 | Neo4j Streams | APOC Trigger |
+|---|---|---|
+| 采集定位 | 变更事件外送插件（更接近数据通道） | 库内触发器（事务钩子） |
+| 对业务逻辑侵入 | 低（配置为主） | 高（Cypher/触发逻辑下沉 DB） |
+| 事务路径负担 | 相对更低 | 相对更高，易放大写事务抖动 |
+| 运维复杂度 | 中（插件部署 + Kafka 依赖） | 中高（触发器生命周期和回滚复杂） |
+| 删除事件可观测性 | 可通过事件流配置和 tombstone 协作增强 | 依赖触发器实现，易遗漏边界 |
+| 推荐角色 | Community 首选直写捕获通道 | 受限场景补洞方案 |
+
+结论（Phase 1）：**若团队已有 Kafka/Connect 运维能力，Streams 通常优于 APOC Trigger**；若当前无法稳定运维 Streams，再退回 APOC Trigger，并以 Reconcile 扫描兜底。
+
+### 9.4 事件模型补充（Community 路径）
+
+`ObjectChangeRawEvent` 建议新增字段（若已有同义字段可复用）：
+
+- `op_type`: `create|update|delete|upsert`
+- `capture_mode`: `outbox|neo4j_streams|apoc_trigger|reconcile`
+- `event_seq`: 递增序列（优先业务版本，其次更新时间戳）
+
+去重键继续使用：`tenant_id + object_type + object_id + object_version`。
+
+### 9.5 删除事件实现建议
+
+Community 下删除最容易丢失，建议二选一：
+
+1. **软删优先**：写 `is_deleted=true, deleted_at`，由扫描器与 Streams/Trigger 都可观察；
+2. **硬删 + 墓碑表**：删前写 tombstone，再执行删除。
+
+没有 tombstone 时，Reconcile 只能发现“对象不存在”，无法确定删除时间与操作者。
+
+### 9.6 Phase 1 里程碑修订（Community 版本）
+
+- M1：Outbox 事件字段补齐 + 单元测试（create/update/delete）。
+- M2：Neo4j Streams PoC（仅 Device）+ 压测去重正确率；若不可用则切 APOC Trigger PoC。
+- M3：Reconcile Scanner + watermark 持久化。
+- M4：双通道/三通道冲突演练（outbox+streams/trigger+reconcile 同版本）。
+- M5：上线守护指标（延迟、重复率、漏检率、删除补偿率）。
+
+### 9.7 升级路径
+
+后续若升级到 Neo4j 5 Enterprise/Aura：
+
+- 保持 `object_change_raw` 契约不变；
+- 仅替换“变更捕获适配层”（`streams|apoc/reconcile -> cdc connector`）；
+- normalize/dedupe、evaluator、activity/action 链路无需重写。
+
+
+## 10. Community 4.4 Streams 端到端验证（新增）
+
+- 用例目标：验证 `User.money` 从 50 更新到 150 后，Monitor 命中 `money > 100`，并触发 Action 将 `User.tag` 从 `poor` 更新为 `rich`。
+- 集成测试：`tests/object_monitor/test_neo4j_streams_user_money_integration.py`。
+- 组件测试：`tests/object_monitor/test_streams_connector.py`（Streams 消息映射）。
+- 运行命令：
+
+```bash
+pytest -q tests/object_monitor/test_streams_connector.py tests/object_monitor/test_neo4j_streams_user_money_integration.py
+```
+
+说明：集成测试依赖可访问 Neo4j（`NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD`），缺失时会自动 `skip`。

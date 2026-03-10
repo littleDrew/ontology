@@ -10,6 +10,7 @@ from .interfaces import EffectExecutor, Evaluator, ReplayService, RuntimeCommand
 from .normalizer import ChangeNormalizer, NormalizationOutput
 from .reconcile import InMemoryReconcileQueue
 from .rollout import RolloutDecision, RolloutGateConfig, RolloutGateEvaluator, RolloutGateResult, RolloutMetrics
+from .streams_connector import Neo4jStreamsEventMapper
 
 __all__ = [
     "ActionDispatcher",
@@ -43,4 +44,5 @@ __all__ = [
     "RolloutGateEvaluator",
     "RolloutGateConfig",
     "RolloutDecision",
+    "Neo4jStreamsEventMapper",
 ]

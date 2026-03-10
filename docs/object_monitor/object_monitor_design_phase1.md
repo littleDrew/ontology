@@ -84,13 +84,19 @@ graph LR
       N1[(Neo4j Graph Store)]
       N2[Ontology Write Path
 Instance/Action Apply]
-      N3[Neo4j CDC Connector]
+      N3[Neo4j Streams Plugin
+(Community 主推荐)]
+      N31[APOC Trigger
+(Streams 不可用时)]
+      N32[Reconcile Scanner
+(updated_at watermark)]
       N4[Tx Outbox Publisher]
     end
 
     subgraph DP[Data Plane]
       B1[(Kafka: object_change_raw)]
-      B11[Change Normalizer & Dedupe]
+      B11[Change Normalizer & Dedupe
+(unified envelope)]
       B2[Context Builder Worker
 formerly Materialize Worker]
       B3[(Context KV Store)]
@@ -108,8 +114,10 @@ formerly Materialize Worker]
     A1 --> A2 --> A3 --> A4
 
     N2 --> N1
-    N1 --> N3 --> B1
     N2 --> N4 --> B1
+    N1 --> N3 --> B1
+    N1 --> N31 --> B1
+    N1 --> N32 --> B1
     B1 --> B11 --> B2 --> B3
     B2 --> B4 --> B5 --> B6 --> B7 --> B8
 
@@ -123,27 +131,32 @@ formerly Materialize Worker]
 - 编译产物（artifact）由 Data Plane 拉取并热更新，避免把规则文本直接放在运行时解释。
 - Context Builder Worker 与 Evaluator 解耦，确保评估主链路不依赖实时图查询。
 - Action 结果（成功/失败/重试）都写回 Activity，保证闭环审计。
+- Community 4.4.48 场景下，DB 侧默认首选 Streams 插件，APOC 仅作为 fallback，Reconcile 负责最终一致性补偿。
 
 ### 4.1 Neo4j 变更感知策略（Phase 1 必做）
 
-为满足“同步写入 + 直接改库”两类路径，Phase 1 采用双通道采集并在归一化层去重：
+为满足“同步写入 + 直接改库”两类路径，Phase 1 采用 **主通道 + 直写采集副通道 + 补偿通道**，并在归一化层去重：
 
 1. **通道 A：Outbox 事件**（应用内写路径）
    - 适用于 `InstanceService/ActionService` 驱动的写入。
    - 在写 Neo4j 事务提交后发布 `ObjectChangeRawEvent` 到 `object_change_raw`。
 
-2. **通道 B：Neo4j CDC 事件**（库级变更路径）
+2. **通道 B：库级变更采集事件**（库级变更路径）
    - 适用于外部同步任务、运维脚本、人工直接修改 Neo4j。
-   - 通过 Neo4j CDC connector 捕获节点/关系变更并投递到同一 raw topic。
+   - Enterprise/Aura 环境优先使用 Neo4j CDC connector；Community 环境优先使用 `Neo4j Streams`，仅在 Streams 不可用时退化为 `APOC Trigger`。
 
-3. **去重与归并**
+3. **通道 C：Reconcile 补偿事件**（最终一致性）
+   - 周期扫描 `updated_at > watermark` 与 tombstone/delete_audit，补齐遗漏变更。
+   - 输出统一 raw 事件，进入同一 dedupe/normalize 流程。
+
+4. **去重与归并**
    - `Change Normalizer` 生成统一事件键：`tenant_id + object_type + object_id + object_version`。
-   - 若同一版本在短窗口重复出现（Outbox+CDC 双发），仅保留一条进入物化链路。
-   - 归并后补齐 `change_source` 字段（`outbox` / `neo4j_cdc`）用于审计。
+   - 若同一版本在短窗口重复出现（Outbox + Streams/APOC/CDC 双发），仅保留一条进入物化链路。
+   - 归并后补齐 `change_source` 字段（`outbox` / `neo4j_streams` / `neo4j_apoc_trigger` / `neo4j_cdc`）用于审计。
 
-4. **一致性护栏**
+5. **一致性护栏**
    - 规则：`object_version` 必须单调递增；出现版本回退进入 `reconcile_queue`。
-   - 规则：CDC 延迟超过阈值时，触发滞后告警并自动降级为“仅 Outbox 可见范围”。
+   - 规则：Streams/CDC 延迟超过阈值时，触发滞后告警并自动提高 Reconcile 扫描频率。
 
 ### 4.2 图中关键组件释义（补充）
 
@@ -152,33 +165,79 @@ formerly Materialize Worker]
 3. `Context Builder Worker` 是“上下文构建器”，名称比 `Materialize Worker` 更直观；功能不变。
 4. `Retry Consumer / DLQ Replay Worker` 负责把重试队列重新投递到 `Action Dispatcher`，以及处理死信重放。
 
-### 4.3 Neo4j APOC Trigger vs Neo4j CDC 选型对比（Phase 1）
+### 4.3 Neo4j Streams / APOC Trigger / Neo4j CDC 选型对比（Phase 1）
 
-为避免后续对“Neo4j trigger 能力”与“CDC connector”概念混淆，补充如下对比：
+为避免后续对三种机制混淆，这里做统一对比：
 
-> 说明：APOC Trigger（如 `apoc.trigger.add`）是数据库内触发机制；Neo4j CDC 是事务日志/变更流捕获机制。二者都可感知变更，但定位不同。
+> 说明：Neo4j CDC 是事务日志级捕获（CDC-enabled 才可用）；Neo4j Streams 是变更事件外送插件；APOC Trigger 是事务钩子触发机制。
 
-| 对比维度 | APOC Trigger | Neo4j CDC |
-|---|---|---|
-| 机制层级 | 库内触发器（事务钩子） | 日志级/流式变更捕获 |
-| 语义特征 | 可直接写条件逻辑、侵入 DB 侧 | 关注变更事实，语义在流处理层补齐 |
-| 对直写 Neo4j 覆盖 | 可覆盖 | 可覆盖 |
-| 运维复杂度 | 高（触发器版本、权限、回滚复杂） | 中（连接器与流平台运维） |
-| 与现架构耦合度 | 高（逻辑下沉 DB） | 低（契合 `raw -> normalize -> evaluate`） |
-| 推荐角色 | 受限场景临时补洞 | 兜底主方案（配合 Outbox） |
+| 对比维度 | Neo4j Streams | APOC Trigger | Neo4j CDC |
+|---|---|---|---|
+| 机制层级 | 插件级事件外送 | 库内触发器（事务钩子） | 日志级/流式变更捕获 |
+| 对业务逻辑侵入 | 低（配置为主） | 高（逻辑下沉 DB） | 低 |
+| 事务路径负担 | 中低 | 中高 | 低 |
+| 对直写 Neo4j 覆盖 | 可覆盖 | 可覆盖 | 可覆盖 |
+| Community 4.4 可用性 | 可用（插件条件满足） | 可用 | 不可用 |
+| 推荐角色（Phase 1） | Community 首选副通道 | 次选补洞 | Enterprise/Aura 首选 |
 
 Phase 1 推荐策略：
 
 1. **主路径**：应用写入口 + Tx Outbox（语义最完整）。
-2. **兜底路径**：Neo4j CDC 捕获直写变更并汇入 `object_change_raw`。
-3. **统一归一化**：`Change Normalizer & Dedupe` 统一 schema 与去重，输出 `object_change`。
-4. **APOC Trigger 使用边界**：仅在无法启用 CDC 且必须快速覆盖直写场景时作为临时方案，且仅做“轻触发投递”，不承载复杂业务规则。
+2. **Community 副路径优先级**：`Neo4j Streams > APOC Trigger`。
+3. **Enterprise/Aura 副路径**：Neo4j CDC。
+4. **统一归一化**：`Change Normalizer & Dedupe` 统一 schema 与去重，输出 `object_change`。
+
+### 4.4 Neo4j Community 4.4.48 适配策略（Phase 1 修订）
+
+由于 Neo4j Community 4.4.48 不提供 CDC connector 依赖的 `db.cdc.*` 能力，Phase 1 在该版本下采用“**Outbox 主通道 + Streams/Trigger 副通道 + 轮询补偿**”模式：
+
+1. **主通道（必须）**：应用写路径统一落 Outbox
+   - `InstanceService/ActionService` 写入完成后发布 `ObjectChangeRawEvent`。
+   - 该通道承载语义最完整的增删改事件（含 actor、trace、业务上下文）。
+
+2. **副通道 A（推荐）**：Neo4j Streams 事件外送
+   - 将图变更按配置推送到 Kafka；由 `Change Normalizer` 映射为统一事件。
+   - 仅承载变更事实传输，不承载业务规则。
+
+3. **副通道 B（次选）**：APOC Trigger 轻触发
+   - 在 `before/after` 只抽取最小字段：`tenant_id/object_type/object_id/object_version/changed_fields/event_time`。
+   - Trigger 内仅做“封装 + 投递（Kafka/HTTP）”，不做规则判断。
+
+4. **副通道 C（兜底）**：定时 Reconcile Scanner
+   - 周期扫描 `updated_at > watermark` 的对象，按主键构造 `upsert` 事件。
+   - 结合墓碑表（tombstone）或删除审计日志补齐 `delete` 事件。
+
+5. **统一去重策略（必须）**
+   - 去重键：`tenant_id + object_type + object_id + object_version`。
+   - 当 Streams/Trigger 与 Reconcile、Outbox 同时命中时，仅保留首条事件进入评估链路。
+
+6. **语义降级声明（必须）**
+   - Community 4.4.48 下不承诺“毫秒级全量事务日志 CDC”。
+   - 删除事件若无墓碑机制，仅能做到“最终一致补偿检测”。
+
+
+7. **Community 4.4 采集优先级建议**
+   - 推荐顺序：`Outbox > Neo4j Streams > APOC Trigger > Reconcile`。
+   - 设计原则：尽量把“变更事实采集”交给标准化插件（Streams），把 APOC 限制在最小补洞范围。
 
 落地约束建议：
 
-- 无论采用 CDC 或 APOC Trigger，均必须走统一 `Trigger Envelope` 与去重键：`tenant_id + object_type + object_id + object_version`。
-- 统一落审计字段：`change_source`（`outbox`/`neo4j_cdc`/`neo4j_apoc_trigger`），便于后续质量评估与迁移。
-- 若 APOC Trigger 与 CDC 同时启用，必须强制开启短窗口去重，防止重复触发 Action。
+- 无论采用 CDC、Neo4j Streams 或 APOC Trigger，均必须走统一 `Trigger Envelope` 与去重键：`tenant_id + object_type + object_id + object_version`。
+- 统一落审计字段：`change_source`（`outbox`/`neo4j_cdc`/`neo4j_streams`/`neo4j_apoc_trigger`），便于后续质量评估与迁移。
+- 若 Streams/Trigger 与 CDC 同时启用，必须强制开启短窗口去重，防止重复触发 Action。
+
+### 4.5 Community 4.4 Streams 端到端验证用例（User money -> tag）
+
+目标：验证“**捕获属性更新 -> 规则评估命中 -> 触发 Action 回写图**”完整闭环。
+
+1. **初始化对象**：创建 `User(U100)`，属性 `money=50, tag='poor'`。
+2. **触发变更**：更新 `money` 为 `150`（模拟外部/直写路径）。
+3. **Streams 捕获映射**：将 Streams 消息映射为 `ObjectChangeEvent(change_source='neo4j_streams')`。
+4. **规则评估**：Monitor 条件 `money > 100` 命中。
+5. **动作执行**：调用 `action://user/tag-rich`，由 Action Gateway 将 `tag` 改为 `rich`。
+6. **结果断言**：`User(U100).tag == 'rich'`，并且 Activity 状态为 `succeeded`。
+
+仓库内对应集成测试：`tests/object_monitor/test_neo4j_streams_user_money_integration.py`（无 Neo4j 环境时自动 skip）。
 
 ---
 
@@ -867,4 +926,3 @@ graph TD
 2. **版本回退测试**：先送 v9 再送 v8，断言进入 reconcile。
 3. **E2E 命中测试**：normalized 事件进入评估链路后，命中规则并写入 Evaluation/Activity。
 4. **数据库切换测试**：同一套 SQLAlchemy 代码在 SQLite 与 MySQL URL 下可运行（MySQL 用 smoke/CI 环境变量门控）。
-

@@ -7,7 +7,7 @@ from ontology.object_monitor.runtime import KafkaConnectClient, Neo4jKafkaSource
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Register Neo4j CDC source connector into Kafka Connect")
+    parser = argparse.ArgumentParser(description="Register Neo4j CDC source connector into Kafka Connect (requires CDC-enabled Neo4j; Community 4.4.x is unsupported)")
     parser.add_argument("--connect-url", required=True)
     parser.add_argument("--connector-name", default="objm-neo4j-cdc")
     parser.add_argument("--neo4j-uri", required=True)
