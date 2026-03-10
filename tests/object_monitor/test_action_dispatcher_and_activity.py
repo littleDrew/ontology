@@ -1,8 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from ontology.object_monitor.api.contracts import EvaluationRecord, EvaluationResult
-from ontology.object_monitor.runtime import ActionDispatcher, ActionGatewayResponse
-from ontology.object_monitor.storage import InMemoryActivityLedger
+from ontology.object_monitor.runtime import ActionGatewayResponse, ThinActionExecutor
 
 
 class ScriptedGateway:
@@ -41,84 +40,52 @@ def _evaluation() -> EvaluationRecord:
     )
 
 
-def test_w5_dispatch_success_updates_activity_and_delivery_log() -> None:
+def test_thin_executor_success() -> None:
     gateway = ScriptedGateway([ActionGatewayResponse(status_code=200, execution_id="exec-1")])
-    ledger = InMemoryActivityLedger()
-    dispatcher = ActionDispatcher(gateway, ledger)
+    executor = ThinActionExecutor(gateway)
 
-    activity_id = dispatcher.dispatch(
+    result = executor.execute(
         _evaluation(),
         action_id="a_ticket",
         endpoint="action://ticket/create",
         payload={"severity": "high"},
         idempotency_template="${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-        now=datetime(2026, 1, 6, 9, 0, 1),
     )
 
-    activity = ledger.get_activity(activity_id)
-    logs = ledger.get_delivery_logs(activity_id)
-    assert activity.status == "succeeded"
-    assert activity.action_execution_id == "exec-1"
-    assert len(logs) == 1
-    assert logs[0].status == "succeeded"
+    assert result.success is True
+    assert result.execution_id == "exec-1"
     assert gateway.calls[0]["idempotency_key"] == "m_hot:D100:99:a_ticket"
 
 
-def test_w5_dispatch_4xx_fails_without_retry() -> None:
+def test_thin_executor_non_retryable_failure() -> None:
     gateway = ScriptedGateway([ActionGatewayResponse(status_code=422, error_code="invalid_payload", error_message="bad")])
-    ledger = InMemoryActivityLedger()
-    dispatcher = ActionDispatcher(gateway, ledger)
+    executor = ThinActionExecutor(gateway)
 
-    activity_id = dispatcher.dispatch(
+    result = executor.execute(
         _evaluation(),
         action_id="a_ticket",
         endpoint="action://ticket/create",
         payload={"severity": "bad"},
         idempotency_template="${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-        now=datetime(2026, 1, 6, 9, 0, 1),
     )
 
-    activity = ledger.get_activity(activity_id)
-    assert activity.status == "failed_non_retryable"
-    assert len(ledger.get_delivery_logs(activity_id)) == 1
+    assert result.success is False
+    assert result.status_code == 422
+    assert result.error_code == "invalid_payload"
 
 
-def test_w5_dispatch_retries_to_dlq_and_supports_manual_replay() -> None:
-    gateway = ScriptedGateway(
-        [
-            ActionGatewayResponse(status_code=503, error_code="upstream_503"),
-            ActionGatewayResponse(status_code=503, error_code="upstream_503"),
-            TimeoutError("timeout"),
-            ActionGatewayResponse(status_code=503, error_code="upstream_503"),
-            ActionGatewayResponse(status_code=200, execution_id="exec-replayed"),
-        ]
-    )
-    ledger = InMemoryActivityLedger()
-    dispatcher = ActionDispatcher(gateway, ledger)
+def test_thin_executor_timeout_maps_to_599() -> None:
+    gateway = ScriptedGateway([TimeoutError("timeout")])
+    executor = ThinActionExecutor(gateway)
 
-    now = datetime(2026, 1, 6, 9, 0, 0)
-    activity_id = dispatcher.dispatch(
+    result = executor.execute(
         _evaluation(),
         action_id="a_ticket",
         endpoint="action://ticket/create",
         payload={"severity": "high"},
         idempotency_template="${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-        now=now,
     )
 
-    dispatcher.process_retry_queue(now=now + timedelta(minutes=1))
-    dispatcher.process_retry_queue(now=now + timedelta(minutes=6))
-    dispatcher.process_retry_queue(now=now + timedelta(hours=1, minutes=6))
-
-    activity = ledger.get_activity(activity_id)
-    assert activity.status == "dead_letter"
-    assert activity_id in ledger.list_dlq_activity_ids("t1")
-
-    dispatcher.replay_dead_letter(activity_id, now=now + timedelta(hours=2))
-    dispatcher.process_retry_queue(now=now + timedelta(hours=2, minutes=1))
-
-    replayed = ledger.get_activity(activity_id)
-    logs = ledger.get_delivery_logs(activity_id)
-    assert replayed.status == "succeeded"
-    assert replayed.action_execution_id == "exec-replayed"
-    assert len(logs) == 5
+    assert result.success is False
+    assert result.status_code == 599
+    assert result.error_code == "timeout"

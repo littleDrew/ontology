@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, Mapping
+from datetime import UTC, datetime
+from typing import Any, Dict, Mapping, Protocol
 
 from ontology.object_monitor.api.contracts import ObjectChangeEvent
 
@@ -32,6 +32,38 @@ class InMemoryContextStore:
 
     def get(self, tenant_id: str, object_type: str, object_id: str) -> ContextSnapshot | None:
         return self._snapshots.get(self.key_for(tenant_id, object_type, object_id))
+
+
+class ContextStore(Protocol):
+    def get(self, tenant_id: str, object_type: str, object_id: str) -> ContextSnapshot | None: ...
+
+
+class Neo4jQueryContextStore:
+    """Fallback provider for phase-1 trim: query context directly from Neo4j on demand."""
+
+    def __init__(self, query_fn):
+        self._query_fn = query_fn
+
+    def get(self, tenant_id: str, object_type: str, object_id: str) -> ContextSnapshot | None:
+        payload = self._query_fn(tenant_id=tenant_id, object_type=object_type, object_id=object_id)
+        if payload is None:
+            return None
+
+        object_version = int(payload.get("object_version", -1))
+        source_version = int(payload.get("source_version", object_version))
+        updated_at = payload.get("updated_at")
+        if not isinstance(updated_at, datetime):
+            updated_at = datetime.now(UTC)
+        flat_payload = {k: v for k, v in payload.items() if k not in {"object_version", "source_version", "updated_at"}}
+        return ContextSnapshot(
+            tenant_id=tenant_id,
+            object_type=object_type,
+            object_id=object_id,
+            object_version=object_version,
+            source_version=source_version,
+            payload=flat_payload,
+            updated_at=updated_at,
+        )
 
 
 class ContextBuilder:

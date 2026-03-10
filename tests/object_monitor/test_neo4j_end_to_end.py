@@ -9,10 +9,10 @@ from ontology.action.storage.edits import AddObjectEdit, ModifyObjectEdit, Objec
 from ontology.instance.storage.graph_store import Neo4jGraphStore
 from ontology.object_monitor.api.contracts import ObjectChangeEvent
 from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
-from ontology.object_monitor.runtime import ActionDispatcher, ContextBuilder, EventFilter, L1Evaluator, MonitorRuntimeSpec
+from ontology.object_monitor.runtime import ContextBuilder, EventFilter, L1Evaluator, MonitorRuntimeSpec, ThinActionExecutor
 from ontology.object_monitor.runtime.action_dispatcher import ActionGatewayResponse
 from ontology.object_monitor.runtime.reconcile import InMemoryReconcileQueue
-from ontology.object_monitor.storage.sqlite_repository import SqliteActivityLedger, SqliteEvaluationLedger
+from ontology.object_monitor.storage.sqlite_repository import SqliteEvaluationLedger
 
 
 class SuccessGateway:
@@ -90,15 +90,13 @@ def test_object_monitor_pipeline_with_neo4j() -> None:
     assert evaluations[0].result.value == "HIT"
     assert reconcile.size() == 0
 
-    activity_ledger = SqliteActivityLedger(":memory:")
-    dispatcher = ActionDispatcher(SuccessGateway(), activity_ledger)
-    activity_id = dispatcher.dispatch(
+    executor = ThinActionExecutor(SuccessGateway())
+    result = executor.execute(
         evaluations[0],
         action_id="ticket.create",
         endpoint="action://ticket/create",
         payload={"device": "D100"},
         idempotency_template=artifact.action_template["idempotency_key"],
     )
-    activity = activity_ledger.get_activity(activity_id)
-    assert activity.status == "succeeded"
-    assert activity.action_execution_id == "exec-ticket.create"
+    assert result.success is True
+    assert result.execution_id == "exec-ticket.create"

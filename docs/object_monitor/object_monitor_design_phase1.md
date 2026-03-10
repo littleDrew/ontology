@@ -239,6 +239,77 @@ Phase 1 推荐策略：
 
 ---
 
+### 4.6 阶段 1「主流程优先」裁剪评估（结合当前代码）
+
+本节针对“阶段 1 先聚焦主流程”的裁剪诉求，结合 `ontology/object_monitor` 当前实现，给出可执行建议。
+
+#### 4.6.1 裁剪 Tx Outbox Publish
+
+**结论：可以裁剪为“暂不启用”，但建议保留接口与契约。**
+
+1. 当前 `DualChannelIngestionPipeline` 支持 Outbox + CDC/Streams 双通道接入；如果本阶段确定只走 Neo4j Streams 或 APOC Trigger，可不接入 Outbox。
+2. 但建议保留 Outbox 发布入口（而非删除），下一阶段恢复“应用写路径增强语义（actor/trace/business context）”时无需改主干结构。
+3. 阶段 1 主流程可简化为：`Streams/APOC -> normalize -> filter -> evaluator -> action`。
+
+#### 4.6.2 移除 Reconcile Scanner
+
+**结论：可以移除定时 Scanner，但需保留异常分流。**
+
+1. 当前实现中，`ChangeNormalizer` 与 `L1Evaluator` 均可产出 `ReconcileEvent`，并通过 `reconcile queue` 暂存异常，不依赖 Scanner 才能跑通主链路。
+2. 若移除 Scanner，语义降级为“异常可见 + 人工补偿”，不再承诺自动补齐。
+3. 建议将 Scanner 明确标记为下一阶段能力，避免阶段 1 目标漂移。
+
+#### 4.6.3 ChangeNormalizer & dedupe unified envelope 是否还需要
+
+**结论：仍然需要，建议保留“轻量版”。**
+
+1. 即使只有一条采集链路，也会遇到重复投递、消费重平衡重复处理、插件消息字段差异等问题；缺少归一化和去重会直接导致重复评估与重复动作。
+2. 当前 `ChangeNormalizer` 已提供最小必要能力：统一字段、短窗去重、版本回退分流。
+3. 可裁剪的是多来源复杂归并逻辑，不是统一 envelope 与 dedupe 本身。
+
+#### 4.6.4 现阶段是否可以不做 Context KV Store
+
+**结论：可暂不引入独立 KV 基础设施，但不建议去掉 Context 抽象。**
+
+1. 当前 `L1Evaluator` 依赖 Context 快照；阶段 1 可把 Context 实现替换为“按需查询 Neo4j”（provider 方式），而不是彻底删除 Context 层。
+2. 直接查 Neo4j 能简化首版交付，但会带来评估延迟抖动与读压风险，需要在阶段目标中显式声明该性能让渡。
+3. 推荐策略：保留 `ContextProvider` 接口，先用 `Neo4jQueryProvider`，下一阶段再回到 KV 物化。
+
+#### 4.6.5 Activity Writer + Retry Topic + DLQ 是否都可省略
+
+**结论：可大幅裁剪，但不建议让 Evaluator 直接耦合 Action API。**
+
+1. 阶段 1 若仅验证“命中即触发 action”，可暂不落完整审计表、重试主题与 DLQ。
+2. 仍建议保留一个最薄执行层（Thin Action Executor / 轻量 Dispatcher），至少负责：幂等键生成、调用 `ActionGatewayAdapter`、返回执行结果。
+3. 若完全去掉执行层并让 `L1Evaluator` 直连 Action API，后续恢复重试/DLQ/审计时改动面更大。
+
+#### 4.6.6 建议的阶段 1 裁剪后最小主流程
+
+```mermaid
+graph LR
+    N1[(Neo4j)] --> N2[Streams/APOC Trigger]
+    N2 --> R1[Raw Event]
+    R1 --> N3[Light Normalizer + Dedupe]
+    N3 --> F1[Event Filter]
+    F1 --> E1[L1 Evaluator]
+    E1 --> D1[Thin Action Executor]
+    D1 --> A1[Action Gateway Adapter]
+```
+
+阶段 1 延后项：
+- Outbox 主通道启用（接口保留）；
+- Reconcile Scanner 定时补偿；
+- 独立 Context KV 物化层；
+- 完整 Activity 审计、Retry Topics、DLQ/Replay。
+
+阶段 1 必保项：
+- 统一事件契约；
+- 去重与幂等；
+- L1 评估与 Action 调用闭环；
+- 最低限度失败可见性（日志/指标）。
+
+---
+
 ## 5. 核心模块详细设计
 
 ## 5.1 Monitor API + DSL Compiler
@@ -316,7 +387,7 @@ effect:
 
 幂等键：`tenantId:monitorId:objectId:sourceVersion`。
 
-## 5.5 Activity Writer
+## 5.5 Activity Writer（阶段 1 裁剪后：延后）
 
 存储模型（MySQL）：
 - `monitor_evaluation`：每次求值一条。
@@ -328,13 +399,15 @@ effect:
 - `(tenant_id, object_id, event_time desc)`
 - `(tenant_id, status, updated_at desc)`
 
-## 5.6 Action Dispatcher（MVP）
+## 5.6 Action Dispatcher（MVP，阶段 1 裁剪后改为 Thin Action Executor）
+> 裁剪说明：阶段 1 默认不落 Activity 审计库，不启用 Retry Topic/DLQ。保留接口定义，下一阶段恢复。
+
 
 ### 5.6.1 调用模型
 
 - 同步调用 Action Gateway（HTTP）。
-- 超时/5xx 进入 `retry_1m -> retry_5m -> retry_1h -> DLQ`。
-- 4xx 按策略直接终止并记录不可重试失败。
+- 阶段 1 裁剪版仅返回执行结果，不启用 Retry Topic/DLQ。
+- 下一阶段恢复重试阶梯与死信重放能力。
 
 ### 5.6.2 幂等与去重
 

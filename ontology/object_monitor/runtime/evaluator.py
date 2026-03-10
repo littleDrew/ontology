@@ -8,7 +8,7 @@ from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from ontology.object_monitor.api.contracts import EvaluationRecord, EvaluationResult, MonitorArtifact, ObjectChangeEvent, ReconcileEvent
-from ontology.object_monitor.runtime.context_builder import InMemoryContextStore
+from ontology.object_monitor.runtime.context_builder import ContextStore
 from ontology.object_monitor.storage.repository import InMemoryEvaluationLedger
 
 
@@ -26,7 +26,7 @@ class L1Evaluator:
 
     def __init__(
         self,
-        context_store: InMemoryContextStore,
+        context_store: ContextStore,
         ledger: InMemoryEvaluationLedger,
         *,
         reconcile_queue: ReconcileQueue | None = None,
