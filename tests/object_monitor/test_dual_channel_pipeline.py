@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from ontology.object_monitor.api.contracts import EvaluationRecord, EvaluationResult, ObjectChangeEvent
+from ontology.object_monitor.api.contracts import ObjectChangeEvent, PropertyChange
 from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import ContextBuilder, DualChannelIngestionPipeline, EventFilter, L1Evaluator, MonitorRuntimeSpec, Neo4jCdcMapper
 from ontology.object_monitor.runtime.action_dispatcher import ActionDispatcher, ActionGatewayResponse
@@ -52,7 +52,10 @@ def test_dual_channel_outbox_plus_cdc_dedupe_and_e2e_runtime() -> None:
         "primaryKey": "D1",
         "sourceVersion": 100,
         "objectVersion": 7,
-        "changedFields": ["status", "temperature"],
+        "changedProperties": [
+            {"field": "temperature", "old": 75, "new": 86},
+            {"field": "status", "old": "IDLE", "new": "RUNNING"},
+        ],
         "eventTime": now.isoformat(),
         "traceId": "tr-cdc",
     }
@@ -64,6 +67,10 @@ def test_dual_channel_outbox_plus_cdc_dedupe_and_e2e_runtime() -> None:
     assert result.deduped_count == 1
 
     event = result.normalized_events[0]
+    assert event.changed_properties == [
+        PropertyChange(field="status", old_value="IDLE", new_value="RUNNING"),
+        PropertyChange(field="temperature", old_value=75, new_value=86),
+    ]
     builder = ContextBuilder()
     builder.build(event, object_payload={"temperature": 86, "status": "RUNNING", "plant_id": "P1"})
 
@@ -88,3 +95,23 @@ def test_dual_channel_outbox_plus_cdc_dedupe_and_e2e_runtime() -> None:
         idempotency_template=artifact.action_template["idempotency_key"],
     )
     assert activity_ledger.get_activity(activity_id).status == "succeeded"
+
+
+def test_neo4j_cdc_mapper_supports_before_after_payload() -> None:
+    payload = {
+        "txId": "ev-cdc-2",
+        "tenantId": "t1",
+        "label": "Device",
+        "primaryKey": "D2",
+        "sourceVersion": 101,
+        "objectVersion": 8,
+        "eventTime": datetime(2026, 2, 2, 9, 1, 0).isoformat(),
+        "before": {"temperature": 70, "status": "IDLE"},
+        "after": {"temperature": 71, "status": "RUNNING"},
+    }
+    event = Neo4jCdcMapper.from_cdc_payload(payload)
+    assert event.changed_fields == ["status", "temperature"]
+    assert event.changed_properties == [
+        PropertyChange(field="status", old_value="IDLE", new_value="RUNNING"),
+        PropertyChange(field="temperature", old_value=70, new_value=71),
+    ]

@@ -13,3 +13,6 @@ neo4j>=5,<6
 # Testing
 pytest>=8,<9
 httpx>=0.27,<1
+
+# CDC stream ingestion
+kafka-python>=2,<3
