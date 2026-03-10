@@ -1,9 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from ontology.object_monitor.api.contracts import EvaluationRecord, EvaluationResult, ObjectChangeEvent
 from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
-from ontology.object_monitor.runtime import ActionDispatcher, ActionGatewayResponse, ContextBuilder, L1Evaluator
-from ontology.object_monitor.storage import InMemoryActivityLedger, InMemoryEvaluationLedger
+from ontology.object_monitor.runtime import ActionGatewayResponse, ContextBuilder, L1Evaluator, ThinActionExecutor
+from ontology.object_monitor.storage import InMemoryEvaluationLedger
 
 
 class FlakyContextStore:
@@ -106,38 +106,18 @@ def test_w6_fault_drill_expression_supports_or_and_in_list() -> None:
     assert rows[0].result is EvaluationResult.hit
 
 
-def test_w6_fault_drill_manual_replay_resets_retry_ladder() -> None:
-    gateway = ScriptedGateway(
-        [
-            ActionGatewayResponse(status_code=503, error_code="upstream_503"),
-            ActionGatewayResponse(status_code=503, error_code="upstream_503"),
-            TimeoutError("timeout"),
-            ActionGatewayResponse(status_code=503, error_code="upstream_503"),
-            ActionGatewayResponse(status_code=503, error_code="upstream_503"),
-            ActionGatewayResponse(status_code=200, execution_id="exec-ok"),
-        ]
-    )
-    activity_ledger = InMemoryActivityLedger()
-    dispatcher = ActionDispatcher(gateway, activity_ledger)
+def test_w6_fault_drill_thin_executor_maps_timeout() -> None:
+    gateway = ScriptedGateway([TimeoutError("timeout")])
+    executor = ThinActionExecutor(gateway)
 
-    base = datetime(2026, 1, 7, 11, 0, 0)
-    activity_id = dispatcher.dispatch(
+    result = executor.execute(
         _evaluation(),
         action_id="a1",
         endpoint="action://ticket/create",
         payload={"x": 1},
         idempotency_template="${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-        now=base,
     )
-    dispatcher.process_retry_queue(now=base + timedelta(minutes=1))
-    dispatcher.process_retry_queue(now=base + timedelta(minutes=6))
-    dispatcher.process_retry_queue(now=base + timedelta(hours=1, minutes=6))
 
-    assert activity_ledger.get_activity(activity_id).status == "dead_letter"
-
-    dispatcher.replay_dead_letter(activity_id, now=base + timedelta(hours=2))
-    dispatcher.process_retry_queue(now=base + timedelta(hours=2, minutes=1))
-    assert activity_ledger.get_activity(activity_id).status == "retry_scheduled"
-
-    dispatcher.process_retry_queue(now=base + timedelta(hours=2, minutes=2))
-    assert activity_ledger.get_activity(activity_id).status == "succeeded"
+    assert result.success is False
+    assert result.status_code == 599
+    assert result.error_code == "timeout"

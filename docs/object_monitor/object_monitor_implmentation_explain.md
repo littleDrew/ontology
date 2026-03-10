@@ -42,20 +42,19 @@
 
 ---
 
-## 3. 数据面主链路：事件进入后如何处理
+## 3. 数据面主链路：事件进入后如何处理（阶段 1 裁剪版）
 
 主链路围绕 runtime 组件串联。
 
-### 3.1 入口与双通道汇流
+### 3.1 入口与单通道主流程
 
-`runtime/change_pipeline.py` 增加了双通道入口能力：
+阶段 1 默认只启用 **Neo4j Streams/APOC 单通道**，对应 `runtime/change_pipeline.py` 的 `SingleChannelIngestionPipeline`：
 
-- `ChangeOutboxRepository`：承接 outbox 写入与 claim；
-- `Neo4jCdcMapper`：把 Neo4j CDC payload 映射成统一变化事件；
-- `DualChannelIngestionPipeline`：统一处理 outbox 与 CDC 输入，做去重、归并和 raw 事件发布；
+- `Neo4jCdcMapper`：把 Streams/APOC/CDC payload 映射成统一变化事件；
+- `SingleChannelIngestionPipeline`：处理单链路输入，做去重、规范化和 raw 事件发布；
 - `InMemoryRawEventBus`：最小可运行 raw bus（测试/本地验证可用）。
 
-这里的目标是把“业务侧写 outbox”和“数据库 CDC”两个来源统一为同一种运行时输入格式，降低后续阶段复杂度。
+`DualChannelIngestionPipeline` 仍保留用于后续恢复 Outbox + CDC 双链路时复用，但不是阶段 1 默认主流程。
 
 ### 3.2 标准化与去重
 
@@ -65,9 +64,12 @@
 - 基于 event key / idempotency token 去重；
 - 识别版本回退或乱序情形并输出 reconcile 信号。
 
-### 3.3 上下文构建
+### 3.3 上下文构建与直接查询兜底
 
-`runtime/context_builder.py` 拉取对象及其关系上下文（当前实现主要覆盖一跳关系的扁平化），把评估所需字段整合到统一 context。
+`runtime/context_builder.py` 同时支持两类 context 来源：
+
+- `ContextBuilder + InMemoryContextStore`：复制模式（本地物化）；
+- `Neo4jQueryContextStore`：阶段 1 裁剪时可直接查 Neo4j 的 provider 兜底实现。
 
 ### 3.4 过滤
 
@@ -81,16 +83,24 @@
 - 重复事件按幂等键抑制重复写入/重复触发；
 - 对异常状态可以输出 `ReconcileEvent` 进入修复链路（`runtime/reconcile.py`）。
 
-### 3.6 动作分发
+### 3.6 动作执行（薄执行层）
 
-`runtime/action_dispatcher.py` 负责：
+阶段 1 主流程使用 `runtime/thin_action_executor.py` 的 `ThinActionExecutor`：
 
-- 将触发结果转换为动作请求；
-- 调 `ActionGateway` 执行；
-- 重试、DLQ、重放（replay）策略；
-- 写 `ActivityLedger` 与 delivery log，确保动作侧可观测。
+- 幂等键生成；
+- 同步调用 Action Gateway；
+- 返回成功/失败结果。
 
-`runtime/action_gateway_adapter.py` 提供与 action 模块的适配，隔离 monitor 与 action 内部实现差异。
+`runtime/action_dispatcher.py`（重试、DLQ、重放、Activity ledger）保留为下一阶段增强能力，不作为本阶段主链路依赖。
+
+`runtime/action_gateway_adapter.py` 提供与 action 模块的 HTTP 适配，隔离 monitor 与 action 内部实现差异。
+
+### 3.7 阶段 1 明确延后项
+
+- Tx Outbox publish 启用（接口保留）；
+- Reconcile Scanner 定时补偿；
+- Activity 审计落库、Retry Topics、DLQ replay；
+- Dispatcher 编排增强（指数退避、死信重放）。
 
 ---
 
@@ -129,8 +139,8 @@ SQLAlchemy 实现重点：
 1. `api/contracts.py`（先看领域对象与接口）；
 2. `api/service.py`（理解控制面编排）；
 3. `runtime/interfaces.py`（理解运行时组件边界）；
-4. `runtime/normalizer.py` → `context_builder.py` → `event_filter.py` → `evaluator.py` → `action_dispatcher.py`（数据面主链路）；
-5. `runtime/change_pipeline.py`（双通道接入与 dedupe）；
+4. `runtime/normalizer.py` → `context_builder.py` → `event_filter.py` → `evaluator.py` → `thin_action_executor.py`（阶段 1 主链路）；
+5. `runtime/change_pipeline.py`（单通道主流程与去重；双通道为后续保留）；
 6. `storage/repository.py` + `sqlite_repository.py` + `sqlalchemy_repository.py`（持久化替换机制）；
 7. `tests/object_monitor/` 对应测试（按功能反向验证实现）。
 
@@ -143,7 +153,7 @@ SQLAlchemy 实现重点：
 - 合约/编译与发布；
 - normalize/filter/evaluate/action 链路；
 - SQLAlchemy 持久化；
-- 双通道 outbox+cdc 去重与端到端执行；
+- 单通道 streams/apoc 去重与端到端执行；
 - Neo4j 端到端集成（依赖外部环境）。
 
 建议 CI 采用“两层跑法”：
@@ -163,7 +173,7 @@ SQLAlchemy 实现重点：
 
 ## 8. 总结
 
-`object_monitor` 当前实现已经具备“可运行链路 + 可替换存储 + 双通道接入框架”。
+`object_monitor` 当前实现已经具备“可运行链路 + 可替换存储 + 阶段化接入框架”。
 对新手来说，抓住两条主线就不容易迷路：
 
 - **控制面**：definition/version 的生命周期管理；

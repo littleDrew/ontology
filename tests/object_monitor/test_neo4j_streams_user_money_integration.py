@@ -8,22 +8,23 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from neo4j import GraphDatabase
 
 from ontology.action.storage.edits import AddObjectEdit, ModifyObjectEdit, ObjectLocator
 from ontology.instance.storage.graph_store import Neo4jGraphStore
 from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import (
-    ActionDispatcher,
     ActionGatewayResponse,
     ContextBuilder,
     EventFilter,
     L1Evaluator,
     MonitorRuntimeSpec,
     Neo4jStreamsEventMapper,
+    ThinActionExecutor,
 )
 from ontology.object_monitor.runtime.reconcile import InMemoryReconcileQueue
-from ontology.object_monitor.storage.sqlite_repository import SqliteActivityLedger, SqliteEvaluationLedger
+from ontology.object_monitor.storage.sqlite_repository import SqliteEvaluationLedger
 
 NEO4J_VERSION = "4.4.48"
 STREAMS_VERSION = "4.1.9"
@@ -138,6 +139,8 @@ def _runtime_neo4j_credentials():
 
     env = os.environ.copy()
     env["JAVA_HOME"] = "/usr/lib/jvm/java-11-openjdk-amd64"
+    if not Path(env["JAVA_HOME"]).exists():
+        pytest.skip("JAVA_HOME for embedded Neo4j is unavailable in current environment")
 
     subprocess.run(
         [str(neo4j_admin), "set-initial-password", "test-password"],
@@ -209,18 +212,15 @@ def test_streams_money_update_triggers_action_and_updates_tag() -> None:
         assert len(evaluations) == 1
         assert evaluations[0].result.value == "HIT"
 
-        activity_ledger = SqliteActivityLedger(":memory:")
-        dispatcher = ActionDispatcher(TagRichGateway(store), activity_ledger)
-        activity_id = dispatcher.dispatch(
+        executor = ThinActionExecutor(TagRichGateway(store))
+        result = executor.execute(
             evaluations[0],
             action_id="user.tag.rich",
             endpoint="action://user/tag-rich",
             payload={"user_id": "U100"},
             idempotency_template=artifact.action_template["idempotency_key"],
         )
-
-        activity = activity_ledger.get_activity(activity_id)
-        assert activity.status == "succeeded"
+        assert result.success is True
 
         final_obj = store.get_object(ObjectLocator("User", "U100"))
         assert final_obj.properties["money"] == 150

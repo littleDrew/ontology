@@ -2,7 +2,7 @@ from datetime import datetime
 
 from ontology.object_monitor.api.contracts import ObjectChangeEvent
 from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
-from ontology.object_monitor.runtime import ContextBuilder, EventFilter, MonitorRuntimeSpec
+from ontology.object_monitor.runtime import ContextBuilder, EventFilter, MonitorRuntimeSpec, Neo4jQueryContextStore
 
 
 def _event(changed_fields: list[str], object_version: int = 11) -> ObjectChangeEvent:
@@ -84,3 +84,19 @@ def test_w3_event_filter_supports_hot_reload() -> None:
 
     event_filter.load_specs([MonitorRuntimeSpec(artifact=second, object_type="Device", watched_fields={"status"})])
     assert [a.monitor_id for a in event_filter.filter_candidates(event, {"plant_id": "P2"})] == ["m_second"]
+
+
+def test_context_provider_can_query_neo4j_fallback_without_kv() -> None:
+    store = Neo4jQueryContextStore(
+        lambda **_: {
+            "object_version": 12,
+            "source_version": 901,
+            "temperature": 85,
+            "status": "RUNNING",
+            "plant_id": "P1",
+        }
+    )
+    snapshot = store.get("t1", "Device", "D100")
+    assert snapshot is not None
+    assert snapshot.object_version == 12
+    assert snapshot.payload["temperature"] == 85

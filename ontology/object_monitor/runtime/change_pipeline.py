@@ -109,6 +109,32 @@ class DualChannelIngestionPipeline:
         return PipelineResult(normalized_events=normalized, deduped_count=deduped, reconcile_events=reconcile)
 
 
+class SingleChannelIngestionPipeline:
+    """Phase-1 trimmed ingestion pipeline for Streams/APOC single source."""
+
+    def __init__(self, normalizer: ChangeNormalizer, raw_sink: RawEventSink | None = None) -> None:
+        self._normalizer = normalizer
+        self._raw_sink = raw_sink or InMemoryRawEventBus()
+
+    def ingest(self, events: Iterable[ObjectChangeEvent]) -> PipelineResult:
+        normalized: list[ObjectChangeEvent] = []
+        deduped = 0
+        reconcile: list[ReconcileEvent] = []
+
+        for event in events:
+            self._raw_sink.publish(event)
+            result = self._normalizer.normalize(event)
+            if result.deduped:
+                deduped += 1
+                continue
+            if result.event is not None:
+                normalized.append(result.event)
+            if result.reconcile_event is not None:
+                reconcile.append(result.reconcile_event)
+
+        return PipelineResult(normalized_events=normalized, deduped_count=deduped, reconcile_events=reconcile)
+
+
 def _dt(value: object) -> datetime:
     """Normalize either datetime objects or ISO strings into datetime."""
     if isinstance(value, datetime):
