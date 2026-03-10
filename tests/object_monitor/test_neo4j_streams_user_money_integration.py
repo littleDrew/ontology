@@ -55,14 +55,14 @@ def test_streams_money_update_triggers_action_and_updates_tag() -> None:
     user = os.getenv("NEO4J_USER")
     password = os.getenv("NEO4J_PASSWORD")
     if not uri or not user or not password:
-        pytest.skip("Neo4j credentials not configured")
+        raise RuntimeError("Neo4j credentials not configured: set NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD")
 
     try:
         driver = GraphDatabase.driver(uri, auth=(user, password))
         with driver.session() as session:
             session.run("RETURN 1").single()
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"Neo4j service unavailable in environment: {exc}")
+        raise RuntimeError(f"Neo4j service unavailable in environment: {exc}") from exc
 
     store = Neo4jGraphStore(uri=uri, user=user, password=password)
     with store._driver.session() as session:
