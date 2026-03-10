@@ -82,54 +82,35 @@ graph LR
 
     subgraph NP[Neo4j & Change Capture]
       N1[(Neo4j Graph Store)]
-      N2[Ontology Write Path
-Instance/Action Apply]
       N3[Neo4j Streams Plugin<br/>Community 主推荐]
       N31[APOC Trigger<br/>Streams 不可用时]
-      N32[Reconcile Scanner
-updated_at watermark]
-      N4[Tx Outbox Publisher]
     end
 
     subgraph DP[Data Plane]
       B1[(Kafka: object_change_raw)]
-      B11[Change Normalizer & Dedupe
-unified envelope]
-      B2[Context Builder Worker
-formerly Materialize Worker]
-      B3[(Context KV Store)]
-      B4[(Kafka: object_change)]
+      B11[Light Change Normalizer & Dedupe]
       B5[Event Filter]
       B6[L1 Evaluator]
-      B7[Activity Writer]
-      B8[(MySQL Activity)]
-      B9[Action Dispatcher]
-      B10[(Retry Topics + DLQ)]
-      B12[Retry Consumer / DLQ Replay Worker]
-      B13[Action Gateway Adapter]
+      B13[Thin Action Executor]
+      B14[Action Gateway Adapter]
+      B15[(Minimal Metrics/Logs)]
     end
 
     A1 --> A2 --> A3 --> A4
 
-    N2 --> N1
-    N2 --> N4 --> B1
     N1 --> N3 --> B1
     N1 --> N31 --> B1
-    N1 --> N32 --> B1
-    B1 --> B11 --> B2 --> B3
-    B2 --> B4 --> B5 --> B6 --> B7 --> B8
-
+    B1 --> B11 --> B5 --> B6 --> B13 --> B14 -->|REST| ACT[ontology/action API]
     A4 --> B5
-    B6 -->|hit| B9 --> B13 -->|REST| ACT[ontology/action API]
-    B9 --> B10 --> B12 --> B9
-    B9 -->|result| B7
+    B6 --> B15
+    B13 --> B15
 ```
 
 **关键解释**：
-- 编译产物（artifact）由 Data Plane 拉取并热更新，避免把规则文本直接放在运行时解释。
-- Context Builder Worker 与 Evaluator 解耦，确保评估主链路不依赖实时图查询。
-- Action 结果（成功/失败/重试）都写回 Activity，保证闭环审计。
-- Community 4.4.48 场景下，DB 侧默认首选 Streams 插件，APOC 仅作为 fallback，Reconcile 负责最终一致性补偿。
+- 当前阶段 1 默认采用单链路采集（Streams/APOC），先保证主流程稳定闭环。
+- `Change Normalizer & Dedupe` 仍是必需组件，用于统一 envelope、短窗去重与版本异常分流。
+- Action 路径采用 Thin Executor（同步调用 + 幂等键），暂不启用 Retry Topic/DLQ/Activity 全量审计。
+- Outbox、Reconcile Scanner、独立 Context KV 物化层在本阶段延后实现（见 4.6 与后文备份图）。
 
 ### 4.1 Neo4j 变更感知策略（Phase 1 必做）
 
@@ -307,6 +288,66 @@ graph LR
 - 去重与幂等；
 - L1 评估与 Action 调用闭环；
 - 最低限度失败可见性（日志/指标）。
+
+---
+
+### 4.7 备份：裁剪前的完整逻辑架构图（供后续阶段恢复参考）
+
+> 说明：以下为阶段 1 裁剪前的完整版本备份，用于 Phase 2+ 恢复 Outbox/Scanner/Activity/Retry/DLQ 能力时参考。
+
+```mermaid
+graph LR
+    subgraph CP[Control Plane]
+      A1[Monitor API]
+      A2[DSL Validator/Compiler]
+      A3[Release Manager]
+      A4[(Artifact Store)]
+    end
+
+    subgraph NP[Neo4j & Change Capture]
+      N1[(Neo4j Graph Store)]
+      N2[Ontology Write Path
+Instance/Action Apply]
+      N3[Neo4j Streams Plugin<br/>Community 主推荐]
+      N31[APOC Trigger<br/>Streams 不可用时]
+      N32[Reconcile Scanner
+updated_at watermark]
+      N4[Tx Outbox Publisher]
+    end
+
+    subgraph DP[Data Plane]
+      B1[(Kafka: object_change_raw)]
+      B11[Change Normalizer & Dedupe
+unified envelope]
+      B2[Context Builder Worker
+formerly Materialize Worker]
+      B3[(Context KV Store)]
+      B4[(Kafka: object_change)]
+      B5[Event Filter]
+      B6[L1 Evaluator]
+      B7[Activity Writer]
+      B8[(MySQL Activity)]
+      B9[Action Dispatcher]
+      B10[(Retry Topics + DLQ)]
+      B12[Retry Consumer / DLQ Replay Worker]
+      B13[Action Gateway Adapter]
+    end
+
+    A1 --> A2 --> A3 --> A4
+
+    N2 --> N1
+    N2 --> N4 --> B1
+    N1 --> N3 --> B1
+    N1 --> N31 --> B1
+    N1 --> N32 --> B1
+    B1 --> B11 --> B2 --> B3
+    B2 --> B4 --> B5 --> B6 --> B7 --> B8
+
+    A4 --> B5
+    B6 -->|hit| B9 --> B13 -->|REST| ACT[ontology/action API]
+    B9 --> B10 --> B12 --> B9
+    B9 -->|result| B7
+```
 
 ---
 
