@@ -53,7 +53,7 @@ bash scripts/object_monitor/start_server.sh
 
 - Runtime 代码统一依赖 `ontology/object_monitor/runtime/*`，其中存储在 `runtime/storage/*`。
 - Define 代码统一依赖 `ontology/object_monitor/define/*`，其中发布仓储在 `define/storage/*`。
-- 共享 ORM 模型统一在 `ontology/object_monitor/define/storage/sql_models.py`。
+- 共享 ORM 模型统一在 `ontology/object_monitor/persistence/sql_models.py`。
 - legacy `ontology/object_monitor/storage/*` 已移除。
 
 
