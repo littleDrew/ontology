@@ -31,15 +31,9 @@ class ScriptedGateway:
 
 def _artifact(expr: str):
     payload = {
-        "monitor": {"id": "m_fault", "objectType": "Device", "scope": ""},
-        "input": {"fields": ["temperature", "status", "plant_id"]},
-        "condition": {"expr": expr},
-        "effect": {
-            "action": {
-                "endpoint": "action://ticket/create",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-            }
-        },
+        "general": {"name": "m_fault", "description": "", "objectType": "Device", "enabled": True},
+        "condition": {"objectSet": {"type": "Device", "properties": ["temperature", "status", "plant_id"]}, "rule": {"expression": expr}},
+        "actions": [{"name": "create_ticket", "actionRef": "action://ticket/create", "parameters": {}}],
     }
     return build_monitor_artifact(parse_monitor_definition(payload), monitor_version=1)
 

@@ -57,14 +57,14 @@ class SqlAlchemyMonitorReleaseService:
         with Session(self._engine) as session:
             existing = session.execute(
                 select(MonitorVersionModel.monitor_version)
-                .where(MonitorVersionModel.monitor_id == parsed.monitor.id)
+                .where(MonitorVersionModel.monitor_id == parsed.general.name)
                 .order_by(MonitorVersionModel.monitor_version.desc())
                 .limit(1)
             ).scalar_one_or_none()
             next_version = (existing or 0) + 1
             artifact = build_monitor_artifact(parsed, monitor_version=next_version, limits=limits)
             record = MonitorVersionModel(
-                monitor_id=parsed.monitor.id,
+                monitor_id=parsed.general.name,
                 monitor_version=next_version,
                 plan_hash=artifact.plan_hash,
                 status=MonitorVersionStatus.draft.value,

@@ -13,15 +13,9 @@ from ontology.object_monitor.storage.sqlite_repository import SqliteEvaluationLe
 
 def _artifact(expr: str):
     payload = {
-        "monitor": {"id": "m1", "objectType": "Device", "scope": ""},
-        "input": {"fields": ["temperature", "status"]},
-        "condition": {"expr": expr},
-        "effect": {
-            "action": {
-                "endpoint": "action://demo/apply",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-            }
-        },
+        "general": {"name": "m1", "description": "", "objectType": "Device", "enabled": True},
+        "condition": {"objectSet": {"type": "Device", "properties": ["temperature", "status"]}, "rule": {"expression": expr}},
+        "actions": [{"name": "apply", "actionRef": "action://demo/apply", "parameters": {}}],
     }
     return build_monitor_artifact(parse_monitor_definition(payload), monitor_version=1)
 

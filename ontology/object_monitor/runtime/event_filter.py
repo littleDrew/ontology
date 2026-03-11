@@ -35,7 +35,7 @@ class EventFilter:
         for spec in specs:
             if spec.watched_fields and changed.isdisjoint(spec.watched_fields):
                 continue
-            scope_expr = str(spec.artifact.predicate_ast.get("scope", "")).strip()
+            scope_expr = str(spec.artifact.scope_predicate_ast.get("expr", "")).strip()
             if not _scope_matches(scope_expr, context_payload):
                 continue
             candidates.append(spec.artifact)

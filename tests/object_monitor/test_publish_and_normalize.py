@@ -7,19 +7,27 @@ from ontology.object_monitor.runtime import ChangeNormalizer
 
 def _sample_payload() -> dict:
     return {
-        "monitor": {
-            "id": "m_high_temp",
+        "general": {
+            "name": "m_high_temp",
+            "description": "high temp",
             "objectType": "Device",
-            "scope": "plant_id in ['P1','P2']",
+            "enabled": True,
         },
-        "input": {"fields": ["temperature", "status", "plant_id"]},
-        "condition": {"expr": "temperature >= 80 && status == 'RUNNING'"},
-        "effect": {
-            "action": {
-                "endpoint": "action://ticket/create",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}",
+        "condition": {
+            "objectSet": {
+                "type": "Device",
+                "scope": "plant_id in ['P1','P2']",
+                "properties": ["temperature", "status", "plant_id"],
+            },
+            "rule": {"expression": "temperature >= 80 && status == 'RUNNING'"},
+        },
+        "actions": [
+            {
+                "name": "create_ticket",
+                "actionRef": "action://ticket/create",
+                "parameters": {"severity": "high"},
             }
-        },
+        ],
     }
 
 
@@ -34,7 +42,7 @@ def test_w2_publish_switch_and_rollback_metadata() -> None:
         now=base_time,
     )
     payload2 = _sample_payload()
-    payload2["condition"]["expr"] = "temperature >= 90 && status == 'RUNNING'"
+    payload2["condition"]["rule"]["expression"] = "temperature >= 90 && status == 'RUNNING'"
     v2 = service.create_definition(
         payload2,
         available_fields={"temperature", "status", "plant_id"},

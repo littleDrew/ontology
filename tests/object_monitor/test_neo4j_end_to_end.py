@@ -10,7 +10,7 @@ from ontology.instance.storage.graph_store import Neo4jGraphStore
 from ontology.object_monitor.api.contracts import ObjectChangeEvent
 from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import ContextBuilder, EventFilter, L1Evaluator, MonitorRuntimeSpec, ThinActionExecutor
-from ontology.object_monitor.runtime.action_dispatcher import ActionGatewayResponse
+from ontology.object_monitor.runtime.thin_action_executor import ActionGatewayResponse
 from ontology.object_monitor.runtime.reconcile import InMemoryReconcileQueue
 from ontology.object_monitor.storage.sqlite_repository import SqliteEvaluationLedger
 
@@ -22,15 +22,9 @@ class SuccessGateway:
 
 def _artifact():
     payload = {
-        "monitor": {"id": "m_neo4j_temp", "objectType": "Device", "scope": "plant_id in ['P1']"},
-        "input": {"fields": ["temperature", "status", "plant_id"]},
-        "condition": {"expr": "temperature >= 80 && status == 'RUNNING'"},
-        "effect": {
-            "action": {
-                "endpoint": "action://ticket/create",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-            }
-        },
+        "general": {"name": "m_neo4j_temp", "description": "", "objectType": "Device", "enabled": True},
+        "condition": {"objectSet": {"type": "Device", "scope": "plant_id in ['P1']", "properties": ["temperature", "status", "plant_id"]}, "rule": {"expression": "temperature >= 80 && status == 'RUNNING'"}},
+        "actions": [{"name": "create_ticket", "actionRef": "action://ticket/create", "parameters": {}}],
     }
     return build_monitor_artifact(parse_monitor_definition(payload), monitor_version=1)
 
@@ -96,7 +90,7 @@ def test_object_monitor_pipeline_with_neo4j() -> None:
         action_id="ticket.create",
         endpoint="action://ticket/create",
         payload={"device": "D100"},
-        idempotency_template=artifact.action_template["idempotency_key"],
+        idempotency_template=artifact.runtime_policy["idempotency_key_template"],
     )
     assert result.success is True
     assert result.execution_id == "exec-ticket.create"

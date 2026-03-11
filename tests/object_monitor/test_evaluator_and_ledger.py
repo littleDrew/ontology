@@ -8,15 +8,9 @@ from ontology.object_monitor.storage import EvaluationQuery, InMemoryEvaluationL
 
 def _artifact(monitor_id: str, expr: str):
     payload = {
-        "monitor": {"id": monitor_id, "objectType": "Device", "scope": ""},
-        "input": {"fields": ["temperature", "status", "owner_name"]},
-        "condition": {"expr": expr},
-        "effect": {
-            "action": {
-                "endpoint": "action://ticket/create",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}",
-            }
-        },
+        "general": {"name": monitor_id, "description": "", "objectType": "Device", "enabled": True},
+        "condition": {"objectSet": {"type": "Device", "properties": ["temperature", "status", "owner_name"]}, "rule": {"expression": expr}},
+        "actions": [{"name": "create_ticket", "actionRef": "action://ticket/create", "parameters": {}}],
     }
     return build_monitor_artifact(parse_monitor_definition(payload), monitor_version=1)
 

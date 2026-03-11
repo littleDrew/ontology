@@ -9,19 +9,27 @@ from ontology.object_monitor.compiler import (
 
 def _sample_payload() -> dict:
     return {
-        "monitor": {
-            "id": "m_high_temp",
+        "general": {
+            "name": "m_high_temp",
+            "description": "high temp",
             "objectType": "Device",
-            "scope": "plant_id in ['P1','P2']",
+            "enabled": True,
         },
-        "input": {"fields": ["temperature", "status", "plant_id"]},
-        "condition": {"expr": "temperature >= 80 && status == 'RUNNING'"},
-        "effect": {
-            "action": {
-                "endpoint": "action://ticket/create",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}",
+        "condition": {
+            "objectSet": {
+                "type": "Device",
+                "scope": "plant_id in ['P1','P2']",
+                "properties": ["temperature", "status", "plant_id"],
+            },
+            "rule": {"expression": "temperature >= 80 && status == 'RUNNING'"},
+        },
+        "actions": [
+            {
+                "name": "create_ticket",
+                "actionRef": "action://ticket/create",
+                "parameters": {"severity": "high"},
             }
-        },
+        ],
     }
 
 
@@ -35,12 +43,12 @@ def test_w1_compile_monitor_artifact_is_stable() -> None:
 
     assert artifact_1.plan_hash == artifact_2.plan_hash
     assert artifact_1.field_projection == ["plant_id", "status", "temperature"]
-    assert artifact_1.predicate_ast["phase"] == "L1"
+    assert artifact_1.rule_predicate_ast["phase"] == "L1"
 
 
 def test_w1_validate_rejects_unregistered_field() -> None:
     payload = _sample_payload()
-    payload["input"]["fields"] = ["temperature", "status", "not_exists"]
+    payload["condition"]["objectSet"]["properties"] = ["temperature", "status", "not_exists"]
     definition = parse_monitor_definition(payload)
 
     ctx = ValidationContext(available_fields={"temperature", "status"})
@@ -51,9 +59,9 @@ def test_w1_validate_rejects_unregistered_field() -> None:
         assert "field not found" in str(exc)
 
 
-def test_w1_validate_requires_idempotency_tokens() -> None:
+def test_w1_validate_rejects_invalid_action_scheme() -> None:
     payload = _sample_payload()
-    payload["effect"]["action"]["idempotencyKey"] = "${monitorId}:${objectId}"
+    payload["actions"][0]["actionRef"] = "http://ticket/create"
     definition = parse_monitor_definition(payload)
 
     ctx = ValidationContext(available_fields={"temperature", "status", "plant_id"})
@@ -61,4 +69,4 @@ def test_w1_validate_requires_idempotency_tokens() -> None:
         validate_monitor_definition(definition, ctx)
         assert False, "expected DSLValidationError"
     except DSLValidationError as exc:
-        assert "idempotencyKey" in str(exc)
+        assert "actionRef" in str(exc)

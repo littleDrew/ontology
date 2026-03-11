@@ -12,7 +12,7 @@ from .api.contracts import (
 from .api.service import InMemoryMonitorReleaseService
 from .compiler.dsl import DSLValidationError, ValidationContext, parse_monitor_definition, validate_monitor_definition
 from .compiler.service import build_monitor_artifact
-from .runtime.action_dispatcher import ActionDispatcher, ActionGateway, ActionGatewayResponse
+from .runtime.thin_action_executor import ActionGateway, ActionGatewayResponse, ThinActionExecutor, ThinActionExecutionResult
 from .runtime.action_gateway_adapter import OntologyActionApiAdapter
 from .runtime.change_pipeline import DualChannelIngestionPipeline, InMemoryRawEventBus, Neo4jCdcMapper, PipelineResult
 from .runtime.context_builder import ContextBuilder, ContextSnapshot, InMemoryContextStore
@@ -38,7 +38,8 @@ __all__ = [
     "ActivityQuery",
     "ActionGatewayResponse",
     "ActionGateway",
-    "ActionDispatcher",
+    "ThinActionExecutor",
+    "ThinActionExecutionResult",
     "SqliteEvaluationLedger",
     "SqliteActivityLedger",
     "SqlAlchemyEvaluationLedger",

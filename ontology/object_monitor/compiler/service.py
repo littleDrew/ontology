@@ -9,25 +9,35 @@ from ontology.object_monitor.api.contracts import MonitorArtifact, MonitorDefini
 
 
 def build_monitor_artifact(definition: MonitorDefinition, monitor_version: int, *, limits: Dict[str, Any] | None = None) -> MonitorArtifact:
-    predicate_ast = {
-        "scope": definition.monitor.scope,
-        "condition": definition.condition.expr,
+    scope_predicate_ast = {
+        "expr": definition.condition.object_set.scope,
         "phase": "L1",
     }
-    action_template = {
-        "endpoint": definition.effect.action.endpoint,
-        "idempotency_key": definition.effect.action.idempotency_key,
+    rule_predicate_ast = {
+        "expr": definition.condition.rule.expression,
+        "phase": "L1",
     }
+    action_templates = [
+        {
+            "name": action.name,
+            "action_ref": action.action_ref,
+            "parameters": action.parameters,
+        }
+        for action in definition.actions
+    ]
+    runtime_policy = {
+        "idempotency_key_template": "${monitorId}:${objectId}:${sourceVersion}:${actionId}",
+        "retry_policy": "none",
+        "max_qps": (limits or {}).get("max_qps", 0),
+    }
+
     normalized_payload = {
-        "monitor": asdict(definition.monitor),
-        "input": asdict(definition.input),
-        "condition": asdict(definition.condition),
-        "effect": {
-            "action": {
-                "endpoint": definition.effect.action.endpoint,
-                "idempotency_key": definition.effect.action.idempotency_key,
-            }
+        "general": asdict(definition.general),
+        "condition": {
+            "object_set": asdict(definition.condition.object_set),
+            "rule": asdict(definition.condition.rule),
         },
+        "actions": [asdict(item) for item in definition.actions],
         "monitor_version": monitor_version,
         "limits": limits or {},
     }
@@ -35,11 +45,13 @@ def build_monitor_artifact(definition: MonitorDefinition, monitor_version: int, 
     plan_hash = f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
     return MonitorArtifact(
-        monitor_id=definition.monitor.id,
+        monitor_id=definition.general.name,
         monitor_version=monitor_version,
         plan_hash=plan_hash,
-        field_projection=sorted(set(definition.input.fields)),
-        predicate_ast=predicate_ast,
-        action_template=action_template,
-        limits=limits or {},
+        object_type=definition.general.object_type,
+        scope_predicate_ast=scope_predicate_ast,
+        field_projection=sorted(set(definition.condition.object_set.properties)),
+        rule_predicate_ast=rule_predicate_ast,
+        action_templates=action_templates,
+        runtime_policy=runtime_policy,
     )

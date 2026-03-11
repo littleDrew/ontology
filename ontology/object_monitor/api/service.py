@@ -43,11 +43,11 @@ class InMemoryMonitorReleaseService:
         validate_monitor_definition(parsed, ValidationContext(available_fields=available_fields))
         now = now or datetime.utcnow()
 
-        versions = self._by_monitor.setdefault(parsed.monitor.id, {})
+        versions = self._by_monitor.setdefault(parsed.general.name, {})
         next_version = (max(versions.keys()) + 1) if versions else 1
         artifact = build_monitor_artifact(parsed, monitor_version=next_version, limits=limits)
         record = MonitorVersionRecord(
-            monitor_id=parsed.monitor.id,
+            monitor_id=parsed.general.name,
             monitor_version=next_version,
             plan_hash=artifact.plan_hash,
             status=MonitorVersionStatus.draft,
@@ -90,10 +90,12 @@ class InMemoryMonitorReleaseService:
             monitor_id=target.artifact.monitor_id,
             monitor_version=new_version,
             plan_hash=target.artifact.plan_hash,
+            object_type=target.artifact.object_type,
+            scope_predicate_ast=dict(target.artifact.scope_predicate_ast),
             field_projection=list(target.artifact.field_projection),
-            predicate_ast=dict(target.artifact.predicate_ast),
-            action_template=dict(target.artifact.action_template),
-            limits=dict(target.artifact.limits),
+            rule_predicate_ast=dict(target.artifact.rule_predicate_ast),
+            action_templates=[dict(item) for item in target.artifact.action_templates],
+            runtime_policy=dict(target.artifact.runtime_policy),
         )
         record = MonitorVersionRecord(
             monitor_id=monitor_id,

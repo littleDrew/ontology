@@ -47,15 +47,9 @@ class TagRichGateway:
 
 def _artifact():
     payload = {
-        "monitor": {"id": "m_user_money_rich", "objectType": "User", "scope": ""},
-        "input": {"fields": ["money", "tag"]},
-        "condition": {"expr": "money > 100"},
-        "effect": {
-            "action": {
-                "endpoint": "action://user/tag-rich",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-            }
-        },
+        "general": {"name": "m_user_money_rich", "description": "", "objectType": "User", "enabled": True},
+        "condition": {"objectSet": {"type": "User", "properties": ["money", "tag"]}, "rule": {"expression": "money > 100"}},
+        "actions": [{"name": "tag_rich", "actionRef": "action://user/tag-rich", "parameters": {"tag": "rich"}}],
     }
     return build_monitor_artifact(parse_monitor_definition(payload), monitor_version=1)
 
@@ -218,7 +212,7 @@ def test_streams_money_update_triggers_action_and_updates_tag() -> None:
             action_id="user.tag.rich",
             endpoint="action://user/tag-rich",
             payload={"user_id": "U100"},
-            idempotency_template=artifact.action_template["idempotency_key"],
+            idempotency_template=artifact.runtime_policy["idempotency_key_template"],
         )
         assert result.success is True
 
