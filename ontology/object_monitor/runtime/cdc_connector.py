@@ -114,18 +114,44 @@ class Neo4jKafkaCdcEventMapper:
     def from_connector_message(value: Dict[str, Any], tenant_id: str, object_type: str, object_id_field: str) -> ObjectChangeEvent:
         event = value.get("event", {}) if isinstance(value.get("event"), dict) else {}
         metadata = value.get("metadata", {}) if isinstance(value.get("metadata"), dict) else {}
-        state = event.get("state", {}) if isinstance(event.get("state"), dict) else {}
-        before = state.get("before", {}) if isinstance(state.get("before"), dict) else {}
-        after = state.get("after", {}) if isinstance(state.get("after"), dict) else {}
+        meta = value.get("meta", {}) if isinstance(value.get("meta"), dict) else {}
+        payload = value.get("payload", {}) if isinstance(value.get("payload"), dict) else {}
 
-        object_id = str(after.get(object_id_field) or before.get(object_id_field) or event.get("elementId") or value.get("id"))
+        state = event.get("state", {}) if isinstance(event.get("state"), dict) else {}
+        before = _extract_properties(state.get("before"))
+        after = _extract_properties(state.get("after"))
+
+        if not before and not after:
+            before = _extract_properties(payload.get("before"))
+            after = _extract_properties(payload.get("after"))
+
+        object_id = str(
+            after.get(object_id_field)
+            or before.get(object_id_field)
+            or payload.get("id")
+            or event.get("elementId")
+            or value.get("id")
+            or ""
+        )
         changed = _property_diff(before, after)
         changed_fields = [row.field for row in changed]
 
-        tx_id = str(value.get("id") or metadata.get("txId") or value.get("txId") or "")
-        event_time = _to_datetime(value.get("timestamp") or metadata.get("txCommitTime") or value.get("eventTime"))
-        source_version = int(metadata.get("txSeq", value.get("seq", 0)) or 0)
-        object_version = int(metadata.get("txSeq", value.get("seq", 0)) or 0)
+        tx_id = str(value.get("id") or meta.get("txId") or metadata.get("txId") or value.get("txId") or "")
+        event_time = _to_datetime(
+            value.get("timestamp")
+            or meta.get("timestamp")
+            or metadata.get("txCommitTime")
+            or value.get("eventTime")
+        )
+        source_version = int(
+            metadata.get("txSeq")
+            or value.get("seq")
+            or meta.get("txSeq")
+            or meta.get("txId")
+            or metadata.get("txId")
+            or 0
+        )
+        object_version = source_version
 
         return ObjectChangeEvent(
             event_id=tx_id or f"{object_type}:{object_id}:{source_version}",
@@ -154,10 +180,24 @@ def _property_diff(before: Dict[str, Any], after: Dict[str, Any]) -> list[Proper
 
 
 def _to_datetime(value: Any):
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     if value is None:
         return datetime.utcnow()
     if isinstance(value, datetime):
         return value
+    if isinstance(value, (int, float)):
+        ts = value / 1000 if value > 1e12 else value
+        return datetime.fromtimestamp(ts, UTC)
+    if isinstance(value, str) and value.isdigit():
+        return _to_datetime(int(value))
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def _extract_properties(node_payload: Any) -> Dict[str, Any]:
+    if isinstance(node_payload, dict):
+        props = node_payload.get("properties")
+        if isinstance(props, dict):
+            return props
+        return node_payload if all(isinstance(k, str) for k in node_payload.keys()) else {}
+    return {}
