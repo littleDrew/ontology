@@ -1,4 +1,3 @@
-from .action_dispatcher import ActionDispatcher, ActionGateway, ActionGatewayResponse
 from .action_gateway_adapter import OntologyActionApiAdapter
 from .cdc_connector import KafkaConnectClient, Neo4jKafkaCdcEventMapper, Neo4jKafkaSourceConfig
 from .change_pipeline import DualChannelIngestionPipeline, InMemoryRawEventBus, Neo4jCdcMapper, PipelineResult, SingleChannelIngestionPipeline
@@ -11,10 +10,9 @@ from .normalizer import ChangeNormalizer, NormalizationOutput
 from .reconcile import InMemoryReconcileQueue
 from .rollout import RolloutDecision, RolloutGateConfig, RolloutGateEvaluator, RolloutGateResult, RolloutMetrics
 from .streams_connector import Neo4jStreamsEventMapper
-from .thin_action_executor import ThinActionExecutionResult, ThinActionExecutor
+from .thin_action_executor import ActionGateway, ActionGatewayResponse, ThinActionExecutionResult, ThinActionExecutor
 
 __all__ = [
-    "ActionDispatcher",
     "ActionGateway",
     "ActionGatewayResponse",
     "InMemoryReconcileQueue",

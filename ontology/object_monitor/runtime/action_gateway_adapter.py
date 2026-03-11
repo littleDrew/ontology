@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict
 from urllib import error, request
 
-from .action_dispatcher import ActionGateway, ActionGatewayResponse
+from .thin_action_executor import ActionGateway, ActionGatewayResponse
 
 
 @dataclass

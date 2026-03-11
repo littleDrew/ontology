@@ -60,7 +60,7 @@ class L1Evaluator:
         records: list[EvaluationRecord] = []
         for artifact in candidates:
             started = time.perf_counter()
-            condition = str(artifact.predicate_ast.get("condition", "")).strip()
+            condition = str(artifact.rule_predicate_ast.get("expr", "")).strip()
             matched = _eval_expr(condition, snapshot.payload)
             reason = f"expr={condition}"
             latency_ms = int((time.perf_counter() - started) * 1000)

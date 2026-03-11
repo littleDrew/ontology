@@ -16,15 +16,9 @@ from ontology.object_monitor.storage import SqlAlchemyEvaluationLedger
 
 def _artifact():
     payload = {
-        "monitor": {"id": "m_pipe", "objectType": "Device", "scope": "plant_id in ['P1']"},
-        "input": {"fields": ["temperature", "status", "plant_id"]},
-        "condition": {"expr": "temperature >= 80 && status == 'RUNNING'"},
-        "effect": {
-            "action": {
-                "endpoint": "action://ticket/create",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}:${actionId}",
-            }
-        },
+        "general": {"name": "m_pipe", "description": "", "objectType": "Device", "enabled": True},
+        "condition": {"objectSet": {"type": "Device", "scope": "plant_id in ['P1']", "properties": ["temperature", "status", "plant_id"]}, "rule": {"expression": "temperature >= 80 && status == 'RUNNING'"}},
+        "actions": [{"name": "create_ticket", "actionRef": "action://ticket/create", "parameters": {}}],
     }
     return build_monitor_artifact(parse_monitor_definition(payload), monitor_version=1)
 

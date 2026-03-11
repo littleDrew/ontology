@@ -51,39 +51,43 @@ class ReconcileEvent:
 
 
 @dataclass(frozen=True)
-class MonitorEnvelope:
-    id: str
+class GeneralDefinition:
+    name: str
+    description: str
     object_type: str
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class ObjectSetDefinition:
+    type: str
+    properties: List[str]
     scope: str = ""
 
 
 @dataclass(frozen=True)
-class InputBinding:
-    fields: List[str]
+class RuleDefinition:
+    expression: str
 
 
 @dataclass(frozen=True)
 class ConditionDefinition:
-    expr: str
+    object_set: ObjectSetDefinition
+    rule: RuleDefinition
 
 
 @dataclass(frozen=True)
-class ActionEffect:
-    endpoint: str
-    idempotency_key: str
-
-
-@dataclass(frozen=True)
-class EffectDefinition:
-    action: ActionEffect
+class ActionDefinition:
+    name: str
+    action_ref: str
+    parameters: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class MonitorDefinition:
-    monitor: MonitorEnvelope
-    input: InputBinding
+    general: GeneralDefinition
     condition: ConditionDefinition
-    effect: EffectDefinition
+    actions: List[ActionDefinition]
 
 
 @dataclass(frozen=True)
@@ -91,10 +95,12 @@ class MonitorArtifact:
     monitor_id: str
     monitor_version: int
     plan_hash: str
+    object_type: str
+    scope_predicate_ast: Dict[str, Any]
     field_projection: List[str]
-    predicate_ast: Dict[str, Any]
-    action_template: Dict[str, Any]
-    limits: Dict[str, Any] = field(default_factory=dict)
+    rule_predicate_ast: Dict[str, Any]
+    action_templates: List[Dict[str, Any]]
+    runtime_policy: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

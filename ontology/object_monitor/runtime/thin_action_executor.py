@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 from ontology.object_monitor.api.contracts import EvaluationRecord
 
-from .action_dispatcher import ActionGateway, ActionGatewayResponse
+
+class ActionGateway(Protocol):
+    def apply_action(self, *, action_id: str, endpoint: str, payload: dict, idempotency_key: str) -> "ActionGatewayResponse": ...
+
+
+@dataclass(frozen=True)
+class ActionGatewayResponse:
+    status_code: int
+    execution_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)

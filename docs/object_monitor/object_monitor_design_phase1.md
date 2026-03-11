@@ -141,39 +141,152 @@ Community 4.4.48 不具备 `db.cdc.*`，采用：
 
 ## 5. 核心模块设计
 
-### 5.1 Monitor API 与 DSL Compiler
+### 5.1 Monitor API + DSL Compiler（Phase 1 优化设计）
 
-#### DSL 最小子集
+> 设计目标：对齐 Palantir 的 `Monitor -> Input -> Condition -> Evaluation -> Activity` 语义，但在本体 Phase 1 里收敛为“**用户可读、后端可编译、运行可审计**”的最小 DSL。  
+> 本阶段 DSL 对用户暴露 3 个核心块：`general`、`condition`、`actions`。
+
+#### 5.1.1 设计原则（结合业界实现）
+
+1. **语义稳定优先于功能堆叠**：借鉴 Palantir 的分层建模（对象范围/输入/条件/执行）与 Datadog Composite Monitor 的“表达式+动作模板”模式，Phase 1 先把对象触发链路跑通，不引入窗口聚合与脚本化执行。
+2. **声明式 DSL + 编译产物分离**：用户提交可读 DSL，控制面编译成不可变 `MonitorArtifact`，数据面只消费 Artifact（避免运行时解释 DSL）。
+3. **输入可解释**：condition 只允许引用显式声明的 object set 字段，防止“规则看得懂、运行取不到”。
+4. **动作可治理**：actions 必须显式定义 action 名称与 actionRef；参数允许最小化或省略，执行策略（幂等/重试）在编译期补齐默认值。
+5. **版本可追溯**：每次发布生成 `monitor_version + plan_hash`，Evaluation/Activity 均记录版本号，支持回放与差异审计。
+
+#### 5.1.2 DSL 结构（Phase 1 Canonical Schema）
 
 ```yaml
-monitor:
-  id: m_high_temp
-  objectType: Device
-  scope: "plant_id in ['P1','P2']"
-input:
-  fields: [temperature, status, updated_at]
+general:
+  name: "user_rich_label_monitor"
+  description: "当用户账户余额大于1000000元时，自动打 rich 标签"
+  objectType: "User"
+  enabled: true
+
 condition:
-  expr: "temperature >= 80 && status == 'RUNNING'"
-effect:
-  action:
-    endpoint: "action://ticket/create"
-    idempotencyKey: "${monitorId}:${objectId}:${sourceVersion}"
+  objectSet:
+    type: "User"
+    properties:
+      - "money"
+      - "label"
+  rule:
+    expression: "money > 1000000"
+
+actions:
+  - name: "set_rich_label"
+    actionRef: "action://user/set-label"
+    parameters:
+      label: "rich"
 ```
 
-支持：比较、布尔、in-list、空值判断、简单字符串函数（`startsWith`）。  
-不支持：聚合窗口、多跳 join、自定义脚本。
+字段说明（用户心智）：
+- `general`：谁在监控、监控什么（名字/描述/对象类型）。
+- `condition.objectSet`：从哪些对象中选样本（对象类型 + 可选范围 + 允许读取的属性）。
+- `condition.rule.expression`：在选中对象上如何判定命中。
+- `actions[]`：命中后要做什么（动作名、目标 Action、参数）。
 
-#### 编译产物
+#### 5.1.3 `scope` 与 `parameters` 是否必要（Phase 1 结论）
 
-`MonitorArtifact`：
+- `objectSet.scope`：**非必填**。默认不写时表示“该 objectType 下全部对象”。
+  - 何时建议填写：只监控某些业务分区（如某租户、某区域）时，用于前置过滤降本。
+  - 何时可省略：像“全量用户余额监控”这类全域规则，省略即可。
+- `actions[].parameters`：**建议保留，但应允许最小化**。
+  - 对“改 label 为 rich”这种场景，只需最小参数（`label: rich`），不需要 `title/severity` 等通知类字段。
+  - 若某个 action 本身无需入参，可允许 `parameters: {}` 或直接省略（由 action 默认值兜底）。
+
+这样可以保持 DSL 对用户简洁，同时不牺牲 Action 接口通用性。
+
+#### 5.1.4 与 Palantir 模型映射
+
+- Palantir `Monitor` -> 本 DSL `general`。
+- Palantir `Input` -> 本 DSL `condition.objectSet.properties`（显式字段投影）。
+- Palantir `Condition` -> 本 DSL `condition.rule.expression`。
+- Palantir `Actions` -> 本 DSL `actions[]`。
+- Palantir `Evaluation/Activity` -> 本体运行时记录（不在 DSL 中显式配置）。
+
+该映射保持了用户创建 monitor 的操作路径一致性：**先选对象集合，再写规则，再配置动作**；同时避免 Phase 1 直接暴露过多运行参数。
+
+#### 5.1.5 表达式与对象集能力边界
+
+Phase 1 `expression` 支持：
+- 比较：`== != > >= < <=`
+- 布尔：`&& || !`
+- 集合：`in`, `not in`
+- 空值：`is null`, `is not null`
+- 字符串：`startsWith`, `contains`
+
+Phase 1 不支持：
+- 聚合窗口（`count over 5m`）、持续时长（`for 1h`）
+- 多跳关系 join（仅主对象 + 一跳展开字段）
+- 自定义脚本/任意函数调用
+
+`objectSet` 约束：
+- `type` 必须与 `general.objectType` 一致。
+- `properties` 必须来自 ontology 元数据（含一跳展开后的白名单字段）。
+- `scope` 仅允许确定性过滤表达式（禁止子查询）。
+
+#### 5.1.6 Monitor API（控制面）
+
+核心接口（Phase 1）：
+1. `POST /api/monitors:validate`：语法/语义校验，仅返回问题列表。
+2. `POST /api/monitors`：创建草稿 monitor（保存原始 DSL）。
+3. `POST /api/monitors/{id}:publish`：编译并发布，生成 `MonitorArtifact`。
+4. `POST /api/monitors/{id}:disable`：停用当前版本。
+5. `GET /api/monitors/{id}/versions/{version}`：查看 DSL + Artifact + 校验报告。
+
+返回模型关键字段：
+- `monitorId`, `version`, `status(draft|active|disabled)`
+- `dslCanonical`（标准化后 DSL）
+- `artifactRef`, `planHash`
+- `validationIssues[]`
+
+#### 5.1.7 DSL Compiler 设计
+
+编译流水线：
+1. **Parse**：YAML/JSON -> AST。
+2. **Normalize**：补默认值、字段排序、模板标准化（保证同义 DSL 产出同一 hash）。
+3. **Semantic Check**：
+   - object type/属性存在性；
+   - expression 字段引用闭包校验；
+   - actionRef 可解析性与参数（若提供）合法性。
+4. **Plan Build**：生成 `field_projection`、`predicate_ast`、`action_templates`、`runtime_limits`。
+5. **Artifact Seal**：计算 `plan_hash`，落库并写 Artifact Store。
+
+编译产物：`MonitorArtifact`
+- `monitor_id`
 - `monitor_version`
 - `plan_hash`
+- `object_type`
+- `scope_predicate_ast`
 - `field_projection`
-- `predicate_ast`
-- `action_template`
-- `limits`（max_qps/retry_policy）
+- `rule_predicate_ast`
+- `action_templates[]`
+- `runtime_policy`（`idempotency_key_template`、`retry_policy`、`max_qps`）
 
-发布前校验：字段存在性、表达式复杂度、Action 模板完整性、幂等键模板合法性。
+#### 5.1.8 最小可用 DSL 示例（用户余额监控）
+
+```yaml
+general:
+  name: "user_money_rich"
+  description: "用户余额超过1000000元自动标记 rich"
+  objectType: "User"
+
+condition:
+  objectSet:
+    type: "User"
+    # scope 可选；本例省略表示全量 User
+    properties: ["money", "label"]
+  rule:
+    expression: "money > 1000000"
+
+actions:
+  - name: "set_label_rich"
+    actionRef: "action://user/set-label"
+    parameters:
+      label: "rich"
+```
+
+说明：上述示例只保留用户可感知的最小字段，运行时幂等键、重试策略、限流等由编译器和执行器使用平台默认策略自动补齐。
 
 ### 5.2 Context Builder Worker
 

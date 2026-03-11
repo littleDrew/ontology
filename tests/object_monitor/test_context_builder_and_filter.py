@@ -22,15 +22,9 @@ def _event(changed_fields: list[str], object_version: int = 11) -> ObjectChangeE
 
 def _artifact(monitor_id: str, *, scope: str = "", condition: str = "temperature >= 80 && status == 'RUNNING'"):
     payload = {
-        "monitor": {"id": monitor_id, "objectType": "Device", "scope": scope},
-        "input": {"fields": ["temperature", "status", "plant_id"]},
-        "condition": {"expr": condition},
-        "effect": {
-            "action": {
-                "endpoint": "action://ticket/create",
-                "idempotencyKey": "${monitorId}:${objectId}:${sourceVersion}",
-            }
-        },
+        "general": {"name": monitor_id, "description": "", "objectType": "Device", "enabled": True},
+        "condition": {"objectSet": {"type": "Device", "scope": scope, "properties": ["temperature", "status", "plant_id"]}, "rule": {"expression": condition}},
+        "actions": [{"name": "create_ticket", "actionRef": "action://ticket/create", "parameters": {}}],
     }
     return build_monitor_artifact(parse_monitor_definition(payload), monitor_version=1)
 
