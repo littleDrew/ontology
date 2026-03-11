@@ -46,22 +46,22 @@ bash scripts/object_monitor/start_server.sh
 - `ontology/object_monitor/runtime/storage/*`：Runtime 侧 evaluation/activity 仓储导出
 - `ontology/object_monitor/runtime/capture/*`：Runtime 内部 capture 能力（pipeline/normalizer/reconcile 与 source 适配）
 
-为降低迁移风险，旧路径（如 `object_monitor/api/*`、`object_monitor/data_plane_app.py`）保留兼容转发层。
+当前为首版本开发态：**不保留兼容转发层**，统一按真实路径导入。
 
 
-## Phase 2 边界收口（当前状态）
+## 当前边界收口（开发态）
 
-- Runtime 代码优先依赖 `ontology/object_monitor/runtime/storage/*`（evaluation/activity 查询与 in-memory ledger）。
-- Define 侧通过 `ontology/object_monitor/define/storage/*` 暴露发布仓储能力（`SqlAlchemyMonitorReleaseService`、`InMemoryMonitorReleaseService`）。
-- 旧路径 `ontology/object_monitor/storage/*` 继续保留用于兼容历史导入；新代码建议优先使用 `define/storage` 与 `runtime/storage`。
+- Runtime 代码统一依赖 `ontology/object_monitor/runtime/*`，其中存储在 `runtime/storage/*`。
+- Define 代码统一依赖 `ontology/object_monitor/define/*`，其中发布仓储在 `define/storage/*`。
+- 共享 ORM 模型统一在 `ontology/object_monitor/persistence/sql_models.py`。
+- legacy `ontology/object_monitor/storage/*` 已移除。
 
 
-## Phase 3 开发态约束（无兼容层）
+## 开发态导入约束
 
-- 已移除旧路径的 re-import 兼容层，统一按新路径导入：
-  - Define：`ontology.object_monitor.define.*`
-  - Runtime：`ontology.object_monitor.runtime.*`
+- Define：`ontology.object_monitor.define.*`
+- Runtime：`ontology.object_monitor.runtime.*`
 - Runtime capture 统一落在：
   - `ontology/object_monitor/runtime/capture/*`
   - `ontology/object_monitor/runtime/capture/sources/*`
-- 开发态请勿再使用旧路径（如 `ontology.object_monitor.api.*`、`ontology.object_monitor.compiler.*`、`ontology.object_monitor.data_plane_app` 等）。
+- 开发态请勿再使用旧路径（如 `ontology.object_monitor.api.*`、`ontology.object_monitor.compiler.*`、`ontology.object_monitor.data_plane_app`、`ontology.object_monitor.storage.*`、`ontology.object_monitor.shared.*`）。

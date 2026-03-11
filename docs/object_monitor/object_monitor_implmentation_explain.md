@@ -15,7 +15,8 @@
 - `api/`：对外服务接口（定义创建、发布、查询、运行时入口）；
 - `compiler/`：DSL 与编译逻辑；
 - `runtime/`：事件处理主链路（normalize/context/filter/evaluator/dispatcher）；
-- `storage/`：持久化（in-memory/sqlite/sqlalchemy）；
+- `define/storage/` + `runtime/storage/`：分域持久化（in-memory/sqlite/sqlalchemy）；
+- `persistence/sql_models.py`：SQLAlchemy ORM 模型定义（define/runtime 共用）。
 - `__init__.py`：对外导出公共能力。
 
 ---
@@ -108,19 +109,18 @@
 
 ### 4.1 统一抽象
 
-`storage/repository.py` 定义核心抽象：
+仓储抽象按域拆分：
 
-- `MonitorReleaseService`
-- `EvaluationLedger`
-- `ActivityLedger`
-- `ChangeOutboxRepository`
+- `define/storage/*`：`MonitorReleaseService` 能力（定义发布/回滚）
+- `runtime/storage/*`：`EvaluationLedger` / `ActivityLedger` / `ChangeOutboxRepository`
+- `persistence/sql_models.py`：SQLAlchemy ORM 共享模型
 
-上层只依赖抽象，不直接依赖数据库驱动。
+上层只依赖域内抽象，不直接依赖数据库驱动。
 
 ### 4.2 现有实现
 
-- `storage/models.py` + `sqlite_repository.py`：SQLite 版本（本地可持久化）；
-- `storage/sql_models.py` + `sqlalchemy_repository.py`：SQLAlchemy 版本，可通过连接串接入 SQLite/MySQL。
+- runtime 侧：`runtime/storage/models.py` + `sqlite_repository.py` + `sqlalchemy_repository.py`；
+- define 侧：`define/storage/sqlalchemy_repository.py`；
 
 SQLAlchemy 实现重点：
 
@@ -141,7 +141,7 @@ SQLAlchemy 实现重点：
 3. `runtime/interfaces.py`（理解运行时组件边界）；
 4. `runtime/normalizer.py` → `context_builder.py` → `event_filter.py` → `evaluator.py` → `thin_action_executor.py`（阶段 1 主链路）；
 5. `runtime/change_pipeline.py`（单通道主流程与去重；双通道为后续保留）；
-6. `storage/repository.py` + `sqlite_repository.py` + `sqlalchemy_repository.py`（持久化替换机制）；
+6. `define/storage/*` + `runtime/storage/*` + `persistence/sql_models.py`（持久化替换机制）；
 7. `tests/object_monitor/` 对应测试（按功能反向验证实现）。
 
 ---
@@ -167,7 +167,7 @@ SQLAlchemy 实现重点：
 
 1. 新增规则语义：优先改 `compiler/dsl.py` 与 `compiler/service.py`；
 2. 新增事件来源：优先改 `runtime/change_pipeline.py` 的 mapper/adapter；
-3. 新增持久化字段：同步修改 `storage/sql_models.py` 与 ledger/release repository 实现，并补回归测试。
+3. 新增持久化字段：同步修改 `persistence/sql_models.py` 与 define/runtime repository 实现，并补回归测试。
 
 ---
 
