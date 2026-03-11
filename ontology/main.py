@@ -10,6 +10,8 @@ from .action.storage.repository import ActionRepository
 from .instance.api.service import InstanceService
 from .instance.storage.graph_store import GraphStore, InMemoryGraphStore
 from .search.api.service import SearchService
+from .object_monitor.api.service import InMemoryMonitorReleaseService
+from .object_monitor.runtime.event_filter import EventFilter
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -29,6 +31,7 @@ def create_app(
     from .action.api.legacy_router import create_legacy_router
     from .action.api.router import create_router as create_action_router
     from .search.api.router import create_router as create_search_router
+    from .object_monitor.api.router import create_router as create_monitor_router
 
     app = FastAPI(title="Ontology API")
 
@@ -40,6 +43,8 @@ def create_app(
 
     instance_service = InstanceService(store)
     search_service = SearchService(instance_service)
+    monitor_release_service = InMemoryMonitorReleaseService()
+    monitor_event_filter = EventFilter()
 
     app.include_router(
         create_action_router(
@@ -49,6 +54,10 @@ def create_app(
         prefix="/api/v1",
     )
     app.include_router(create_search_router(search_service), prefix="/api/v1")
+    app.include_router(
+        create_monitor_router(monitor_release_service, monitor_event_filter),
+        prefix="/api/v1",
+    )
 
     if include_legacy_routes:
         app.include_router(

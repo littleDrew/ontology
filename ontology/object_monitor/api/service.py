@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, List
 from uuid import uuid4
 
 from ontology.object_monitor.api.contracts import (
@@ -125,6 +125,15 @@ class InMemoryMonitorReleaseService:
             if bundle.record.status is MonitorVersionStatus.active:
                 return bundle.artifact
         raise KeyError(f"no active version for monitor: {monitor_id}")
+
+    def list_active_artifacts(self) -> List[MonitorArtifact]:
+        """Return active artifacts for all monitors."""
+        artifacts: List[MonitorArtifact] = []
+        for versions in self._by_monitor.values():
+            for bundle in versions.values():
+                if bundle.record.status is MonitorVersionStatus.active:
+                    artifacts.append(bundle.artifact)
+        return artifacts
 
     def _require_bundle(self, monitor_id: str, monitor_version: int) -> _MonitorVersionBundle:
         """Load a specific version bundle or raise a descriptive KeyError."""
