@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ontology.object_monitor.define.api.contracts import MonitorArtifact, MonitorDefinition, MonitorVersionRecord, MonitorVersionStatus
 from ontology.object_monitor.define.compiler.dsl import ValidationContext, parse_monitor_definition, validate_monitor_definition
 from ontology.object_monitor.define.compiler.service import build_monitor_artifact
-from ontology.object_monitor.storage.sql_models import Base, MonitorVersionModel
+from ontology.object_monitor.define.storage.sql_models import Base, MonitorVersionModel
 
 
 class SqlAlchemyMonitorReleaseService:
