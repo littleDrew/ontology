@@ -108,21 +108,6 @@ http://localhost:8765/openapi.json
 
 > 说明：`/` 根路径默认会重定向到 `/docs`。如果看到 `404 Not Found`，请确认使用的是最新代码并优先访问上面的 `/docs` 或 `/api/v1/*` 接口路径。
 
-## Object Monitor CDC（Neo4j Kafka Connector）
-
-Object Monitor Phase 1 的 CDC 集成分析与落地方案见：
-
-- `docs/object_monitor/object_monitor_cdc_integration_plan.md`
-
-可选工具脚本：
-
-- `scripts/object_monitor/register_neo4j_cdc_connector.py`：注册/更新 Kafka Connect 的 Neo4j CDC Source Connector。
-
-真实 CDC 捕获测试（非 mock payload，直接调用 `db.cdc.query`）见：
-
-- `tests/object_monitor/test_neo4j_cdc_capture_integration.py`
-
-
 ## 测试
 
 ```bash

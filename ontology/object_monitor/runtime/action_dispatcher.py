@@ -5,9 +5,9 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Protocol
 from uuid import uuid4
 
-from ontology.object_monitor.api.contracts import EvaluationRecord
-from ontology.object_monitor.storage.activity_repository import InMemoryActivityLedger
-from ontology.object_monitor.storage.models import ActionDeliveryLogRow, MonitorActivityRow
+from ontology.object_monitor.define.api.contracts import EvaluationRecord
+from ontology.object_monitor.runtime.storage.activity_repository import InMemoryActivityLedger
+from ontology.object_monitor.runtime.storage.models import ActionDeliveryLogRow, MonitorActivityRow
 
 
 class ActionGateway(Protocol):

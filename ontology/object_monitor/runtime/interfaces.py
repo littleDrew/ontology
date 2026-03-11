@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, Sequence
 
-from ontology.object_monitor.api.contracts import EvaluationRecord, MonitorArtifact, ObjectChangeEvent
+from ontology.object_monitor.define.api.contracts import EvaluationRecord, MonitorArtifact, ObjectChangeEvent
 
 
 class Evaluator(Protocol):

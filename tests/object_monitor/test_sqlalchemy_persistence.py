@@ -1,7 +1,8 @@
 from datetime import datetime
 
-from ontology.object_monitor.storage.sqlalchemy_repository import SqlAlchemyEvaluationLedger, SqlAlchemyMonitorReleaseService
-from ontology.object_monitor.api.contracts import EvaluationRecord, EvaluationResult
+from ontology.object_monitor.runtime.storage.sqlalchemy_repository import SqlAlchemyEvaluationLedger
+from ontology.object_monitor.define.storage.sqlalchemy_repository import SqlAlchemyMonitorReleaseService
+from ontology.object_monitor.define.api.contracts import EvaluationRecord, EvaluationResult
 
 
 def _sample_payload() -> dict:

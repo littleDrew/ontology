@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from ontology.object_monitor.api.contracts import EvaluationResult, ObjectChangeEvent
-from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
+from ontology.object_monitor.define.api.contracts import EvaluationResult, ObjectChangeEvent
+from ontology.object_monitor.define.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import ContextBuilder, L1Evaluator
-from ontology.object_monitor.storage import EvaluationQuery, InMemoryEvaluationLedger
+from ontology.object_monitor.runtime.storage import EvaluationQuery, InMemoryEvaluationLedger
 
 
 def _artifact(monitor_id: str, expr: str):

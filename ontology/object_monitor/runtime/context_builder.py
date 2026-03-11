@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Dict, Mapping, Protocol
 
-from ontology.object_monitor.api.contracts import ObjectChangeEvent
+from ontology.object_monitor.define.api.contracts import ObjectChangeEvent
 
 
 @dataclass(frozen=True)

@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ontology.object_monitor.api.contracts import MonitorVersionRecord
-from ontology.object_monitor.api.service import InMemoryMonitorReleaseService
+from ontology.object_monitor.define.api.contracts import MonitorVersionRecord
+from ontology.object_monitor.define.api.service import InMemoryMonitorReleaseService
 from ontology.object_monitor.runtime.event_filter import EventFilter, MonitorRuntimeSpec
 
 
@@ -23,6 +23,18 @@ class MonitorRollbackRequest(BaseModel):
     target_version: int
     operator: str
 
+
+
+class MonitorArtifactResponse(BaseModel):
+    monitor_id: str
+    monitor_version: int
+    plan_hash: str
+    object_type: str
+    scope_predicate_ast: dict
+    field_projection: list[str]
+    rule_predicate_ast: dict
+    action_templates: list[dict]
+    runtime_policy: dict
 
 class MonitorVersionResponse(BaseModel):
     monitor_id: str
@@ -59,6 +71,23 @@ def create_router(release_service: InMemoryMonitorReleaseService, event_filter: 
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         _reload_event_filter(release_service, event_filter)
         return _to_response(record)
+
+    @router.get("/monitors/active-artifacts", response_model=list[MonitorArtifactResponse])
+    def list_active_artifacts() -> list[MonitorArtifactResponse]:
+        return [
+            MonitorArtifactResponse(
+                monitor_id=artifact.monitor_id,
+                monitor_version=artifact.monitor_version,
+                plan_hash=artifact.plan_hash,
+                object_type=artifact.object_type,
+                scope_predicate_ast=artifact.scope_predicate_ast,
+                field_projection=artifact.field_projection,
+                rule_predicate_ast=artifact.rule_predicate_ast,
+                action_templates=artifact.action_templates,
+                runtime_policy=artifact.runtime_policy,
+            )
+            for artifact in release_service.list_active_artifacts()
+        ]
 
     @router.post("/monitors/{monitor_id}/rollback", response_model=MonitorVersionResponse)
     def rollback_monitor(monitor_id: str, request: MonitorRollbackRequest) -> MonitorVersionResponse:

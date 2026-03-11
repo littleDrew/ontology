@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import List
 
 from ontology.object_monitor.define.api.contracts import EvaluationRecord
-from ontology.object_monitor.storage.activity_repository import ActivityQuery
-from ontology.object_monitor.storage.models import ActionDeliveryLogRow, MonitorActivityRow, MonitorEvaluationRow
-from ontology.object_monitor.storage.repository import EvaluationQuery
+from ontology.object_monitor.runtime.storage.activity_repository import ActivityQuery
+from ontology.object_monitor.runtime.storage.models import ActionDeliveryLogRow, MonitorActivityRow, MonitorEvaluationRow
+from ontology.object_monitor.runtime.storage.repository import EvaluationQuery
 
 
 def _iso(dt: datetime) -> str:

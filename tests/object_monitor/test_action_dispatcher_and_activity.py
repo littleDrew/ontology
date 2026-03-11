@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from ontology.object_monitor.api.contracts import EvaluationRecord, EvaluationResult
+from ontology.object_monitor.define.api.contracts import EvaluationRecord, EvaluationResult
 from ontology.object_monitor.runtime import ActionGatewayResponse, ThinActionExecutor
 
 

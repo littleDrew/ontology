@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Tuple
 
-from ontology.object_monitor.api.contracts import ObjectChangeEvent, PropertyChange, ReconcileEvent
+from ontology.object_monitor.define.api.contracts import ObjectChangeEvent, PropertyChange, ReconcileEvent
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,7 @@ class NormalizationOutput:
 
 
 class ChangeNormalizer:
-    """Normalize raw outbox/CDC events and dedupe by object version window."""
+    """Normalize raw outbox/streams events and dedupe by object version window."""
 
     def __init__(self, dedupe_window_seconds: int = 30) -> None:
         self._dedupe_window = timedelta(seconds=dedupe_window_seconds)

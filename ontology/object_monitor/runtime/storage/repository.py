@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 
 from ontology.object_monitor.define.api.contracts import EvaluationRecord
-from ontology.object_monitor.storage.models import MonitorEvaluationRow
+from ontology.object_monitor.runtime.storage.models import MonitorEvaluationRow
 
 
 @dataclass(frozen=True)
@@ -52,3 +52,6 @@ class InMemoryEvaluationLedger:
         if query.end_time is not None:
             rows = [row for row in rows if row.event_time <= query.end_time]
         return sorted(rows, key=lambda row: row.event_time, reverse=True)
+
+
+__all__ = ["EvaluationQuery", "InMemoryEvaluationLedger"]

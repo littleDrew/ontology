@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Mapping, Set
 
-from ontology.object_monitor.api.contracts import MonitorArtifact, ObjectChangeEvent
+from ontology.object_monitor.define.api.contracts import MonitorArtifact, ObjectChangeEvent
 
 _SCOPE_IN_PATTERN = re.compile(r"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+\[(.*)\]\s*$")
 _SCOPE_EQ_PATTERN = re.compile(r"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*==\s*'([^']*)'\s*$")

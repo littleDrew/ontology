@@ -8,9 +8,9 @@ from fastapi import FastAPI
 
 from ontology.main import create_app
 from ontology.instance.storage.graph_store import InMemoryGraphStore
-from ontology.object_monitor.api.router import create_router as create_monitor_router
-from ontology.object_monitor.api.service import InMemoryMonitorReleaseService
-from ontology.object_monitor.api.contracts import ObjectChangeEvent
+from ontology.object_monitor.define.api.router import create_router as create_monitor_router
+from ontology.object_monitor.define.api.service import InMemoryMonitorReleaseService
+from ontology.object_monitor.define.api.contracts import ObjectChangeEvent
 from ontology.object_monitor.runtime.event_filter import EventFilter
 from datetime import datetime
 

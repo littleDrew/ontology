@@ -13,7 +13,7 @@ from neo4j import GraphDatabase
 
 from ontology.action.storage.edits import AddObjectEdit, ModifyObjectEdit, ObjectLocator
 from ontology.instance.storage.graph_store import Neo4jGraphStore
-from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
+from ontology.object_monitor.define.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import (
     ActionGatewayResponse,
     ContextBuilder,
@@ -23,8 +23,8 @@ from ontology.object_monitor.runtime import (
     Neo4jStreamsEventMapper,
     ThinActionExecutor,
 )
-from ontology.object_monitor.runtime.reconcile import InMemoryReconcileQueue
-from ontology.object_monitor.storage.sqlite_repository import SqliteEvaluationLedger
+from ontology.object_monitor.runtime.capture.reconcile import InMemoryReconcileQueue
+from ontology.object_monitor.runtime.storage.sqlite_repository import SqliteEvaluationLedger
 
 NEO4J_VERSION = "4.4.48"
 STREAMS_VERSION = "4.1.9"

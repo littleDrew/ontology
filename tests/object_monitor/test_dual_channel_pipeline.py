@@ -1,17 +1,16 @@
 from datetime import datetime
 
-from ontology.object_monitor.api.contracts import PropertyChange
-from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
+from ontology.object_monitor.define.api.contracts import PropertyChange
+from ontology.object_monitor.define.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import (
     ChangeNormalizer,
     ContextBuilder,
     EventFilter,
     L1Evaluator,
     MonitorRuntimeSpec,
-    Neo4jCdcMapper,
     SingleChannelIngestionPipeline,
 )
-from ontology.object_monitor.storage import SqlAlchemyEvaluationLedger
+from ontology.object_monitor.runtime.storage import SqlAlchemyEvaluationLedger
 
 
 def _artifact():
@@ -39,7 +38,24 @@ def test_single_channel_stream_event_dedupe_and_e2e_runtime() -> None:
         "eventTime": now.isoformat(),
         "traceId": "tr-stream",
     }
-    stream_event = Neo4jCdcMapper.from_cdc_payload(payload)
+    from ontology.object_monitor.define.api.contracts import ObjectChangeEvent
+
+    stream_event = ObjectChangeEvent(
+        event_id=str(payload["txId"]),
+        tenant_id=str(payload["tenantId"]),
+        object_type=str(payload["label"]),
+        object_id=str(payload["primaryKey"]),
+        source_version=int(payload["sourceVersion"]),
+        object_version=int(payload["objectVersion"]),
+        changed_fields=["temperature", "status"],
+        event_time=now,
+        trace_id=str(payload["traceId"]),
+        change_source="neo4j_streams",
+        changed_properties=[
+            PropertyChange(field="status", old_value="IDLE", new_value="RUNNING"),
+            PropertyChange(field="temperature", old_value=75, new_value=86),
+        ],
+    )
 
     pipeline = SingleChannelIngestionPipeline(ChangeNormalizer(dedupe_window_seconds=60))
     result = pipeline.ingest([stream_event, stream_event])
@@ -65,22 +81,3 @@ def test_single_channel_stream_event_dedupe_and_e2e_runtime() -> None:
     assert len(evaluations) == 1
     assert evaluations[0].result.value == "HIT"
 
-
-def test_neo4j_cdc_mapper_supports_before_after_payload() -> None:
-    payload = {
-        "txId": "ev-cdc-2",
-        "tenantId": "t1",
-        "label": "Device",
-        "primaryKey": "D2",
-        "sourceVersion": 101,
-        "objectVersion": 8,
-        "eventTime": datetime(2026, 2, 2, 9, 1, 0).isoformat(),
-        "before": {"temperature": 70, "status": "IDLE"},
-        "after": {"temperature": 71, "status": "RUNNING"},
-    }
-    event = Neo4jCdcMapper.from_cdc_payload(payload)
-    assert event.changed_fields == ["status", "temperature"]
-    assert event.changed_properties == [
-        PropertyChange(field="status", old_value="IDLE", new_value="RUNNING"),
-        PropertyChange(field="temperature", old_value=70, new_value=71),
-    ]

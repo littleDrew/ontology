@@ -3,12 +3,12 @@ import threading
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from ontology.object_monitor.api.contracts import EvaluationRecord, EvaluationResult, ObjectChangeEvent
-from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
+from ontology.object_monitor.define.api.contracts import EvaluationRecord, EvaluationResult, ObjectChangeEvent
+from ontology.object_monitor.define.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import ContextBuilder, L1Evaluator, OntologyActionApiAdapter, ThinActionExecutor
-from ontology.object_monitor.runtime.reconcile import InMemoryReconcileQueue
-from ontology.object_monitor.storage import EvaluationQuery
-from ontology.object_monitor.storage.sqlite_repository import SqliteEvaluationLedger
+from ontology.object_monitor.runtime.capture.reconcile import InMemoryReconcileQueue
+from ontology.object_monitor.runtime.storage import EvaluationQuery
+from ontology.object_monitor.runtime.storage.sqlite_repository import SqliteEvaluationLedger
 
 
 def _artifact(expr: str):
