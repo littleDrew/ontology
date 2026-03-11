@@ -98,6 +98,56 @@ graph LR
 
 主流程顺序：**变更采集 -> 归一化去重 -> 上下文更新 -> 规则过滤 -> L1 求值 -> Action 执行 -> 结果记录与可观测**。
 
+
+### 3.1 进程边界与部署关系（补充）
+
+结合当前代码实现（`ontology/main.py`、`ontology/object_monitor/*`、`ontology/action/*`），Phase 1 推荐按“控制面/数据面/动作服务”拆分部署，逻辑与进程边界如下：
+
+1. **Neo4j & Change Capture 与 Data Plane 是独立进程（通常也是独立服务）**。
+   - Neo4j、Neo4j Streams/APOC Trigger、以及 Kafka Connect/Outbox Publisher 位于采集侧；
+   - Data Plane 从 Kafka `object_change_raw` 消费并执行归一化、上下文构建、评估与动作分发。
+2. **Data Plane 内部，Object Monitor 运行时与本体主服务可同进程也可拆进程**。
+   - 当前仓库默认可嵌入本体服务进程（同一 Python 应用）运行；
+   - 生产建议将 Object Monitor runtime worker 独立进程化（便于弹性与故障隔离）。
+3. **Object Monitor 与 ontology/action 建议按不同进程部署**。
+   - Object Monitor 通过 `Action Gateway Adapter` 以 REST 调用 `ontology/action API`；
+   - 两者解耦后可独立扩缩容，且动作执行故障不会阻塞监控评估主循环。
+
+> 结论：阶段 1 的“逻辑架构图”是功能分层图，不强制物理同进程；默认推荐至少拆成 `Change Capture`、`Object Monitor Data Plane`、`Action Service` 三类进程。
+
+### 3.2 `kafka: object_change_raw` 语义澄清（补充）
+
+`object_change_raw` 是**从 Kafka 接收的原始变更事件主题**，用于承接多来源原始消息（Outbox、Neo4j CDC、Neo4j Streams/APOC）。该主题中的消息结构在来源间可能不同，Data Plane 在 `Change Normalizer & Dedupe` 前完成统一映射。
+
+当前已确认的一类真实事件（Streams 风格）如下：
+
+```json
+{
+  "meta": {
+    "timestamp": 1773195063404,
+    "username": "neo4j",
+    "txId": 197,
+    "txEventId": 0,
+    "txEventsCount": 1,
+    "operation": "updated",
+    "source": {"hostname": "neo4j"}
+  },
+  "payload": {
+    "id": "12",
+    "before": {"properties": {"city": "北京"}, "labels": ["Person"]},
+    "after": {"properties": {"city": "上海"}, "labels": ["Person"]},
+    "type": "node"
+  },
+  "schema": {"properties": {"city": "String"}, "Constraints": []}
+}
+```
+
+映射约定（Phase 1）：
+- `meta.txId` -> `event_id/trace_id/source_version/object_version`（优先）；
+- `meta.timestamp`（毫秒时间戳）-> `event_time`；
+- `payload.before.properties` 与 `payload.after.properties` 做字段 diff 得到 `changed_properties/changed_fields`；
+- `payload.id` 或对象主键字段 -> `object_id`。
+
 ---
 
 ## 4. Neo4j 变更采集策略
