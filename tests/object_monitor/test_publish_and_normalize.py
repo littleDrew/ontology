@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
-from ontology.object_monitor.api import InMemoryMonitorReleaseService
-from ontology.object_monitor.api.contracts import MonitorVersionStatus, ObjectChangeEvent
+from ontology.object_monitor.define.api.service import InMemoryMonitorReleaseService
+from ontology.object_monitor.define.api.contracts import MonitorVersionStatus, ObjectChangeEvent
 from ontology.object_monitor.runtime import ChangeNormalizer
 
 
@@ -86,7 +86,7 @@ def test_w2_normalize_dedupe_outbox_cdc_double_emit() -> None:
         changed_fields=["temperature", "status"],
         event_time=event_time + timedelta(seconds=1),
         trace_id="tr-2",
-        change_source="neo4j_cdc",
+        change_source="neo4j_streams",
     )
 
     first = normalizer.normalize(outbox)
@@ -129,7 +129,7 @@ def test_w2_normalize_sends_version_regression_to_reconcile() -> None:
             changed_fields=["status"],
             event_time=event_time + timedelta(seconds=1),
             trace_id="tr-old",
-            change_source="neo4j_cdc",
+            change_source="neo4j_streams",
         )
     )
 

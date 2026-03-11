@@ -7,12 +7,12 @@ from neo4j import GraphDatabase
 
 from ontology.action.storage.edits import AddObjectEdit, ModifyObjectEdit, ObjectLocator
 from ontology.instance.storage.graph_store import Neo4jGraphStore
-from ontology.object_monitor.api.contracts import ObjectChangeEvent
-from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
+from ontology.object_monitor.define.api.contracts import ObjectChangeEvent
+from ontology.object_monitor.define.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import ContextBuilder, EventFilter, L1Evaluator, MonitorRuntimeSpec, ThinActionExecutor
 from ontology.object_monitor.runtime.thin_action_executor import ActionGatewayResponse
-from ontology.object_monitor.runtime.reconcile import InMemoryReconcileQueue
-from ontology.object_monitor.storage.sqlite_repository import SqliteEvaluationLedger
+from ontology.object_monitor.runtime.capture.reconcile import InMemoryReconcileQueue
+from ontology.object_monitor.runtime.storage.sqlite_repository import SqliteEvaluationLedger
 
 
 class SuccessGateway:
@@ -62,7 +62,7 @@ def test_object_monitor_pipeline_with_neo4j() -> None:
         changed_fields=["temperature", "status"],
         event_time=datetime(2026, 1, 10, 9, 0, 0),
         trace_id="trace-neo4j",
-        change_source="neo4j_cdc",
+        change_source="neo4j_streams",
     )
 
     context_builder = ContextBuilder()

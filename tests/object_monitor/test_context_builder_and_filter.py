@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from ontology.object_monitor.api.contracts import ObjectChangeEvent
-from ontology.object_monitor.compiler import build_monitor_artifact, parse_monitor_definition
+from ontology.object_monitor.define.api.contracts import ObjectChangeEvent
+from ontology.object_monitor.define.compiler import build_monitor_artifact, parse_monitor_definition
 from ontology.object_monitor.runtime import ContextBuilder, EventFilter, MonitorRuntimeSpec, Neo4jQueryContextStore
 
 

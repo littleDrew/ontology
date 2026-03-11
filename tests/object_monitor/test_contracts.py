@@ -1,4 +1,4 @@
-from ontology.object_monitor.compiler import (
+from ontology.object_monitor.define.compiler import (
     DSLValidationError,
     ValidationContext,
     build_monitor_artifact,

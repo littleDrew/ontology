@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict
 
-from ontology.object_monitor.api.contracts import ObjectChangeEvent, PropertyChange
+from ontology.object_monitor.define.api.contracts import ObjectChangeEvent, PropertyChange
 
 
 class Neo4jStreamsEventMapper:

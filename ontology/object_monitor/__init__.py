@@ -1,4 +1,4 @@
-from .api.contracts import (
+from .define.api.contracts import (
     ActivityRecord,
     EvaluationRecord,
     EvaluationResult,
@@ -9,18 +9,18 @@ from .api.contracts import (
     ObjectChangeEvent,
     ReconcileEvent,
 )
-from .api.service import InMemoryMonitorReleaseService
-from .compiler.dsl import DSLValidationError, ValidationContext, parse_monitor_definition, validate_monitor_definition
-from .compiler.service import build_monitor_artifact
+from .define.api.service import InMemoryMonitorReleaseService
+from .define.compiler.dsl import DSLValidationError, ValidationContext, parse_monitor_definition, validate_monitor_definition
+from .define.compiler.service import build_monitor_artifact
 from .runtime.thin_action_executor import ActionGateway, ActionGatewayResponse, ThinActionExecutor, ThinActionExecutionResult
 from .runtime.action_gateway_adapter import OntologyActionApiAdapter
-from .runtime.change_pipeline import DualChannelIngestionPipeline, InMemoryRawEventBus, Neo4jCdcMapper, PipelineResult
+from .runtime.capture.pipeline import DualChannelIngestionPipeline, InMemoryRawEventBus, PipelineResult
 from .runtime.context_builder import ContextBuilder, ContextSnapshot, InMemoryContextStore
 from .runtime.event_filter import EventFilter, MonitorRuntimeSpec
 from .runtime.evaluator import EvaluatorConfig, L1Evaluator
-from .runtime.normalizer import ChangeNormalizer, NormalizationOutput
+from .runtime.capture.normalizer import ChangeNormalizer, NormalizationOutput
 from .runtime.rollout import RolloutDecision, RolloutGateConfig, RolloutGateEvaluator, RolloutGateResult, RolloutMetrics
-from .runtime.reconcile import InMemoryReconcileQueue
+from .runtime.capture.reconcile import InMemoryReconcileQueue
 
 __all__ = [
     "ActivityRecord",
@@ -50,7 +50,6 @@ __all__ = [
     "OntologyActionApiAdapter",
     "DualChannelIngestionPipeline",
     "InMemoryRawEventBus",
-    "Neo4jCdcMapper",
     "PipelineResult",
     "build_monitor_artifact",
     "ContextBuilder",
@@ -74,9 +73,8 @@ __all__ = [
     "validate_monitor_definition",
 ]
 
-from .storage.repository import EvaluationQuery, InMemoryEvaluationLedger
-
-from .storage.activity_repository import ActivityQuery, InMemoryActivityLedger
-
-from .storage.sqlite_repository import SqliteActivityLedger, SqliteEvaluationLedger
-from .storage.sqlalchemy_repository import SqlAlchemyActivityLedger, SqlAlchemyChangeOutboxRepository, SqlAlchemyEvaluationLedger, SqlAlchemyMonitorReleaseService
+from .runtime.storage.repository import EvaluationQuery, InMemoryEvaluationLedger
+from .runtime.storage.activity_repository import ActivityQuery, InMemoryActivityLedger
+from .runtime.storage.sqlite_repository import SqliteActivityLedger, SqliteEvaluationLedger
+from .runtime.storage.sqlalchemy_repository import SqlAlchemyActivityLedger, SqlAlchemyChangeOutboxRepository, SqlAlchemyEvaluationLedger
+from .define.storage.sqlalchemy_repository import SqlAlchemyMonitorReleaseService

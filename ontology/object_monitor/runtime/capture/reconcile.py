@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
-from ontology.object_monitor.api.contracts import ReconcileEvent
+from ontology.object_monitor.define.api.contracts import ReconcileEvent
 
 
 @dataclass

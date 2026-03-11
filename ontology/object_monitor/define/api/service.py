@@ -5,14 +5,14 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List
 from uuid import uuid4
 
-from ontology.object_monitor.api.contracts import (
+from ontology.object_monitor.define.api.contracts import (
     MonitorArtifact,
     MonitorDefinition,
     MonitorVersionRecord,
     MonitorVersionStatus,
 )
-from ontology.object_monitor.compiler.dsl import ValidationContext, parse_monitor_definition, validate_monitor_definition
-from ontology.object_monitor.compiler.service import build_monitor_artifact
+from ontology.object_monitor.define.compiler.dsl import ValidationContext, parse_monitor_definition, validate_monitor_definition
+from ontology.object_monitor.define.compiler.service import build_monitor_artifact
 
 
 @dataclass

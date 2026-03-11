@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict
 from typing import Any, Dict
 
-from ontology.object_monitor.api.contracts import MonitorArtifact, MonitorDefinition
+from ontology.object_monitor.define.api.contracts import MonitorArtifact, MonitorDefinition
 
 
 def build_monitor_artifact(definition: MonitorDefinition, monitor_version: int, *, limits: Dict[str, Any] | None = None) -> MonitorArtifact:

@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-from ontology.object_monitor.api.contracts import (
+from ontology.object_monitor.define.api.contracts import (
     ActionDefinition,
     ConditionDefinition,
     GeneralDefinition,

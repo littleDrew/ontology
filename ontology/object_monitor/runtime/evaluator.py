@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
 
-from ontology.object_monitor.api.contracts import EvaluationRecord, EvaluationResult, MonitorArtifact, ObjectChangeEvent, ReconcileEvent
+from ontology.object_monitor.define.api.contracts import EvaluationRecord, EvaluationResult, MonitorArtifact, ObjectChangeEvent, ReconcileEvent
 from ontology.object_monitor.runtime.context_builder import ContextStore
-from ontology.object_monitor.storage.repository import InMemoryEvaluationLedger
+from ontology.object_monitor.runtime.storage.repository import InMemoryEvaluationLedger
 
 
 class ReconcileQueue(Protocol):

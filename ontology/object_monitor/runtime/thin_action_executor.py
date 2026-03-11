@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from ontology.object_monitor.api.contracts import EvaluationRecord
+from ontology.object_monitor.define.api.contracts import EvaluationRecord
 
 
 class ActionGateway(Protocol):

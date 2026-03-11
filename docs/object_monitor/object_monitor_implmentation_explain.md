@@ -50,11 +50,11 @@
 
 阶段 1 默认只启用 **Neo4j Streams/APOC 单通道**，对应 `runtime/change_pipeline.py` 的 `SingleChannelIngestionPipeline`：
 
-- `Neo4jCdcMapper`：把 Streams/APOC/CDC payload 映射成统一变化事件；
+- Streams/APOC 事件映射：把输入 payload 映射成统一变化事件；
 - `SingleChannelIngestionPipeline`：处理单链路输入，做去重、规范化和 raw 事件发布；
 - `InMemoryRawEventBus`：最小可运行 raw bus（测试/本地验证可用）。
 
-`DualChannelIngestionPipeline` 仍保留用于后续恢复 Outbox + CDC 双链路时复用，但不是阶段 1 默认主流程。
+`DualChannelIngestionPipeline` 仍保留用于后续恢复双链路（Outbox + Secondary Source）时复用，但不是阶段 1 默认主流程。
 
 ### 3.2 标准化与去重
 
