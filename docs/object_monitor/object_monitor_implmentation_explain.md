@@ -59,10 +59,8 @@
 
 补充（Streams 事件映射）：
 
-- `runtime/api/change_capture_app.py` 已支持 Neo4j Streams 的 `node` 与 `relationship` 两类 payload：
-  - `node`：`object_type` 取节点 label，`object_id` 取 payload.id；
-  - `relationship`：`object_type` 取关系 label（如 `WORKS_AS`），`object_id` 取关系 id（缺失时退化为 `start->label->end`）。
-- `ObjectChangeEvent` 仍保持统一领域模型，但 REST 入参中的 `tenant_id` 提供默认值 `global`，避免 Streams 接入时引入业务租户前置依赖。
+- Streams 风格负载由 `runtime/capture/raw_consumer.py` 的 `RawEventParser` 直接映射为统一 `ObjectChangeEvent`（支持 `node`/`relationship`）。
+- Runtime 通过 Kafka consumer 直接拉取 `object_change_raw`；开发态可通过 `/api/v1/data-plane/raw/consumer/poll-once` 触发单次拉取验证。
 
 ### 3.2 标准化与去重
 

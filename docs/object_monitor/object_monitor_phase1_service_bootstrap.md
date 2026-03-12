@@ -1,4 +1,4 @@
-# Object Monitor Phase 1 服务拉起与 REST 端到端联调
+# Object Monitor Phase 1 服务拉起与联调（整理版）
 
 当前阶段建议启动两个 FastAPI 服务：
 
@@ -9,16 +9,17 @@
      - Action 创建：`POST /api/v1/actions`
      - Action 执行：`POST /api/v1/actions/{action_id}/apply`
 
-2. **Object Monitor Server（Data Plane + Capture Worker）**
-   - 启动命令：`python -m scripts.object_monitor.object_monitor_server --port 8771 --action-base-url http://127.0.0.1:8765`
+2. **Object Monitor Server（Data Plane）**
+   - 启动命令：`python -m scripts.object_monitor.object_monitor_server --port 8771 --action-base-url http://127.0.0.1:8765 --kafka-bootstrap-servers 127.0.0.1:9092 --kafka-topic object_change_raw`
    - 提供：
      - 加载生效 Artifact：`POST /api/v1/data-plane/reload-artifacts`
-     - 处理对象变更事件：`POST /api/v1/data-plane/events/object-change`
+     - 重试/死信运维：`POST /api/v1/data-plane/raw/retry/process`、`GET /api/v1/data-plane/raw/dead-letters`、`POST /api/v1/data-plane/raw/dead-letters/{dead_letter_id}/replay`
      - 运行结果查询：`GET /api/v1/data-plane/evaluations`、`GET /api/v1/data-plane/activities`
-     - （可选）开发联调入口：`POST /api/v1/change-capture/neo4j/streams`
 
-> 说明：`Change Capture` 在生产形态应优先采用 Kafka consumer（消费 `object_change_raw` 或来源 topic）接收变更；
-> 当前 REST 入口仅用于本地调试/联调，便于直接注入 Streams 样例事件，不应作为唯一接入方式。
+> 关键澄清：
+>
+> - **Phase 1 生产形态仅保留 Object Monitor 单服务入口（Kafka consumer）**。
+> - 生产接入采用 **Kafka Consumer** 直接消费 `object_change_raw`（或来源 topic），由 Object Monitor Data Plane 内完成归一化与处理。
 
 ## 一键拉起（本地）
 
@@ -31,7 +32,7 @@ bash scripts/object_monitor/start_server.sh
 1. 在 Main Server 创建并发布 Monitor。
 2. 从 `GET /api/v1/monitors/active-artifacts` 获取运行时 Artifact。
 3. 调用 Data Plane 的 `reload-artifacts` 装载规则。
-4. 生产环境通过消息队列投递变更事件；本地联调可直接调用 Change Capture 调试入口或 Data Plane 事件入口。
+4. Object Monitor Runtime 通过 Kafka consumer 消费 `object_change_raw`（生产/联调一致）；必要时使用 `POST /api/v1/data-plane/raw/consumer/poll-once` 做开发态单次拉取验证。
 5. 通过 Data Plane `activities/evaluations` 校验命中和动作执行状态。
 
 
@@ -41,7 +42,7 @@ bash scripts/object_monitor/start_server.sh
 
 - `ontology/object_monitor/define/api/*`：Monitor 定义/发布控制面接口与服务
 - `ontology/object_monitor/define/storage/*`：Definition 侧仓储抽象与实现导出
-- `ontology/object_monitor/runtime/api/*`：Data Plane FastAPI 入口（含可选的 Change Capture 调试路由）
+- `ontology/object_monitor/runtime/api/*`：Data Plane FastAPI 入口（retry/dead-letter/replay/consumer poll）
 - `ontology/object_monitor/runtime/storage/*`：Runtime 侧 evaluation/activity 仓储导出
 - `ontology/object_monitor/runtime/capture/*`：Runtime 内部 capture 能力（pipeline/normalizer/reconcile 与 source 适配）
 - `scripts/object_monitor/service_factory.py`：服务组装与启动依赖注入（脚本层）。

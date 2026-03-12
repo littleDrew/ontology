@@ -1,5 +1,14 @@
 from .action_gateway_adapter import OntologyActionApiAdapter
 from .capture.pipeline import DualChannelIngestionPipeline, InMemoryRawEventBus, PipelineResult, SingleChannelIngestionPipeline
+from .capture.raw_consumer import (
+    DeadLetterMessage,
+    KafkaConsumerConfig,
+    KafkaRawConsumerRunner,
+    RawConsumerMetrics,
+    RawConsumerRuntime,
+    RawEventParser,
+    RawTopicMessage,
+)
 from .context_builder import ContextBuilder, ContextSnapshot, ContextStore, InMemoryContextStore, Neo4jQueryContextStore
 from .event_filter import EventFilter, MonitorRuntimeSpec
 from .evaluator import EvaluatorConfig, L1Evaluator
@@ -42,4 +51,11 @@ __all__ = [
     "Neo4jStreamsEventMapper",
     "ThinActionExecutor",
     "ThinActionExecutionResult",
+    "RawConsumerRuntime",
+    "RawEventParser",
+    "RawTopicMessage",
+    "RawConsumerMetrics",
+    "DeadLetterMessage",
+    "KafkaConsumerConfig",
+    "KafkaRawConsumerRunner",
 ]
