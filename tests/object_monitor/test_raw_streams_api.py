@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+import types
 
 import pytest
 
@@ -18,7 +19,7 @@ from ontology.object_monitor.runtime.event_filter import EventFilter
 from ontology.object_monitor.runtime.evaluator import L1Evaluator
 from ontology.object_monitor.runtime.storage.activity_repository import InMemoryActivityLedger
 from ontology.object_monitor.runtime.storage.repository import InMemoryEvaluationLedger
-from ontology.service_factory import build_ontology_main_server_app
+from scripts.object_monitor.service_factory import build_ontology_main_server_app
 
 
 class LocalActionGateway:
@@ -59,21 +60,26 @@ def _relation_streams_event() -> dict:
     }
 
 
-class FakeConsumer:
-    def __init__(self, records: dict[object, list[object]]) -> None:
-        self._records = records
+class FakeKafkaConsumer:
+    last_init_kwargs: dict | None = None
+    seeded_records: dict[object, list[object]] = {}
+
+    def __init__(self, *topics: str, **kwargs) -> None:
+        self._topics = topics
+        self._kwargs = kwargs
+        FakeKafkaConsumer.last_init_kwargs = {"topics": topics, **kwargs}
 
     def poll(self, timeout_ms: int = 1000) -> dict[object, list[object]]:
         _ = timeout_ms
-        out = self._records
-        self._records = {}
+        out = FakeKafkaConsumer.seeded_records
+        FakeKafkaConsumer.seeded_records = {}
         return out
 
     def close(self) -> None:
         return None
 
 
-def test_streams_kafka_consumer_end_to_end_to_data_plane() -> None:
+def test_streams_kafka_consumer_end_to_end_to_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
     main_client = TestClient(build_ontology_main_server_app())
     create_action = main_client.post(
         "/api/v1/actions",
@@ -124,10 +130,12 @@ def test_streams_kafka_consumer_end_to_end_to_data_plane() -> None:
     topic_partition = "tp0"
     message = SimpleNamespace(key=None, value=_relation_streams_event(), partition=0, offset=7)
     data_plane_client = TestClient(create_object_monitor_data_plane_app(monitor_service))
+    FakeKafkaConsumer.seeded_records = {topic_partition: [message]}
+    fake_kafka_module = types.SimpleNamespace(KafkaConsumer=FakeKafkaConsumer)
+    monkeypatch.setitem(__import__("sys").modules, "kafka", fake_kafka_module)
     monitor_service.kafka_runner = KafkaRawConsumerRunner(
         runtime=monitor_service.raw_consumer,
-        config=KafkaConsumerConfig(bootstrap_servers="fake:9092"),
-        consumer_factory=lambda cfg: FakeConsumer({topic_partition: [message]}),
+        config=KafkaConsumerConfig(bootstrap_servers="fake:9092", group_id="object-monitor-runtime"),
     )
     reload_resp = data_plane_client.post("/api/v1/data-plane/reload-artifacts", json={"artifacts": artifacts.json()})
     assert reload_resp.status_code == 200
@@ -135,6 +143,9 @@ def test_streams_kafka_consumer_end_to_end_to_data_plane() -> None:
     poll = data_plane_client.post("/api/v1/data-plane/raw/consumer/poll-once")
     assert poll.status_code == 200
     assert poll.json()["consumed"] == 1
+    assert FakeKafkaConsumer.last_init_kwargs is not None
+    assert FakeKafkaConsumer.last_init_kwargs["topics"] == ("object_change_raw",)
+    assert FakeKafkaConsumer.last_init_kwargs["bootstrap_servers"] == "fake:9092"
 
     activities = data_plane_client.get("/api/v1/data-plane/activities", params={"tenant_id": "global"})
     assert activities.status_code == 200

@@ -17,7 +17,7 @@ from ontology.object_monitor.runtime.event_filter import EventFilter
 from ontology.object_monitor.runtime.evaluator import L1Evaluator
 from ontology.object_monitor.runtime.storage.activity_repository import InMemoryActivityLedger
 from ontology.object_monitor.runtime.storage.repository import InMemoryEvaluationLedger
-from ontology.service_factory import build_ontology_main_server_app
+from scripts.object_monitor.service_factory import build_ontology_main_server_app
 
 
 class LocalActionGateway:
