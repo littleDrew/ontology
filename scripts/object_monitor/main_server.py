@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+
 import uvicorn
 
-from ontology.service_factory import build_ontology_main_server_app
+from scripts.object_monitor.service_factory import build_ontology_main_server_app
 
 
 def main() -> None:

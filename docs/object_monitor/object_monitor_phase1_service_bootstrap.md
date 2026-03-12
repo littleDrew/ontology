@@ -1,25 +1,24 @@
 # Object Monitor Phase 1 服务拉起与 REST 端到端联调
 
-新增了三个可独立启动的 FastAPI 服务，分别对应阶段 1 设计中的三个进程边界：
+当前阶段建议启动两个 FastAPI 服务：
 
 1. **Ontology Main Server（Control Plane + Action API）**
-   - 启动命令：`python -m ontology.servers.main_server --port 8765`
+   - 启动命令：`python -m scripts.object_monitor.main_server --port 8765`
    - 提供：
      - Monitor 控制面：`/api/v1/monitors/*`
      - Action 创建：`POST /api/v1/actions`
      - Action 执行：`POST /api/v1/actions/{action_id}/apply`
 
-2. **Object Monitor Data Plane Server**
-   - 启动命令：`python -m ontology.servers.object_monitor_server --port 8771 --action-base-url http://127.0.0.1:8765`
+2. **Object Monitor Server（Data Plane + Capture Worker）**
+   - 启动命令：`python -m scripts.object_monitor.object_monitor_server --port 8771 --action-base-url http://127.0.0.1:8765`
    - 提供：
      - 加载生效 Artifact：`POST /api/v1/data-plane/reload-artifacts`
      - 处理对象变更事件：`POST /api/v1/data-plane/events/object-change`
      - 运行结果查询：`GET /api/v1/data-plane/evaluations`、`GET /api/v1/data-plane/activities`
+     - （可选）开发联调入口：`POST /api/v1/change-capture/neo4j/streams`
 
-3. **Neo4j & Change Capture Server（简化）**
-   - 启动命令：`python -m ontology.servers.change_capture_server --port 8770 --data-plane-base-url http://127.0.0.1:8771`
-   - 提供：
-     - Streams 事件归一化并转发：`POST /api/v1/change-capture/neo4j/streams`
+> 说明：`Change Capture` 在生产形态应优先采用 Kafka consumer（消费 `object_change_raw` 或来源 topic）接收变更；
+> 当前 REST 入口仅用于本地调试/联调，便于直接注入 Streams 样例事件，不应作为唯一接入方式。
 
 ## 一键拉起（本地）
 
@@ -32,7 +31,7 @@ bash scripts/object_monitor/start_server.sh
 1. 在 Main Server 创建并发布 Monitor。
 2. 从 `GET /api/v1/monitors/active-artifacts` 获取运行时 Artifact。
 3. 调用 Data Plane 的 `reload-artifacts` 装载规则。
-4. 向 Change Capture 或 Data Plane 直接发送对象变更事件。
+4. 生产环境通过消息队列投递变更事件；本地联调可直接调用 Change Capture 调试入口或 Data Plane 事件入口。
 5. 通过 Data Plane `activities/evaluations` 校验命中和动作执行状态。
 
 
@@ -42,12 +41,10 @@ bash scripts/object_monitor/start_server.sh
 
 - `ontology/object_monitor/define/api/*`：Monitor 定义/发布控制面接口与服务
 - `ontology/object_monitor/define/storage/*`：Definition 侧仓储抽象与实现导出
-- `ontology/object_monitor/runtime/api/*`：Data Plane / Change Capture 的 FastAPI 入口
+- `ontology/object_monitor/runtime/api/*`：Data Plane FastAPI 入口（含可选的 Change Capture 调试路由）
 - `ontology/object_monitor/runtime/storage/*`：Runtime 侧 evaluation/activity 仓储导出
 - `ontology/object_monitor/runtime/capture/*`：Runtime 内部 capture 能力（pipeline/normalizer/reconcile 与 source 适配）
-
-当前为首版本开发态：**不保留兼容转发层**，统一按真实路径导入。
-
+- `scripts/object_monitor/service_factory.py`：服务组装与启动依赖注入（脚本层）。
 
 ## 当前边界收口（开发态）
 

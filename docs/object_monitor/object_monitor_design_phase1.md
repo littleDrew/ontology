@@ -103,9 +103,9 @@ graph LR
 
 结合当前代码实现（`ontology/main.py`、`ontology/object_monitor/*`、`ontology/action/*`），Phase 1 推荐按“控制面/数据面/动作服务”拆分部署，逻辑与进程边界如下：
 
-1. **Neo4j & Change Capture 与 Data Plane 是独立进程（通常也是独立服务）**。
-   - Neo4j、Neo4j Streams/APOC Trigger、以及 Kafka Connect/Outbox Publisher 位于采集侧；
-   - Data Plane 从 Kafka `object_change_raw` 消费并执行归一化、上下文构建、评估与动作分发。
+1. **Neo4j/Kafka 等基础设施为外部独立服务，不由 ontology 进程拉起**。
+   - Neo4j、Neo4j Streams/APOC Trigger、Kafka Connect/Outbox Publisher 属于采集侧基础设施；
+   - ontology 仅负责消费/接收已产生的变更事件，不在启动脚本内管理这些依赖服务生命周期。
 2. **Data Plane 内部，Object Monitor 运行时与本体主服务可同进程也可拆进程**。
    - 当前仓库默认可嵌入本体服务进程（同一 Python 应用）运行；
    - 生产建议将 Object Monitor runtime worker 独立进程化（便于弹性与故障隔离）。
@@ -113,7 +113,7 @@ graph LR
    - Object Monitor 通过 `Action Gateway Adapter` 以 REST 调用 `ontology/action API`；
    - 两者解耦后可独立扩缩容，且动作执行故障不会阻塞监控评估主循环。
 
-> 结论：阶段 1 的“逻辑架构图”是功能分层图，不强制物理同进程；默认推荐至少拆成 `Change Capture`、`Object Monitor Data Plane`、`Action Service` 三类进程。
+> 结论：阶段 1 的“逻辑架构图”是功能分层图，不强制物理同进程；当前开发态默认拆成两个服务：`Main Server` 与 `Object Monitor Server`。其中 `Object Monitor Server` 同时暴露 Data Plane 与 Change Capture 入口，便于本地联调；生产可按吞吐和隔离需求再拆分。
 
 ### 3.2 `kafka: object_change_raw` 语义澄清（补充）
 

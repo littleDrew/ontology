@@ -17,6 +17,7 @@ class StreamsPayloadEnvelope(BaseModel):
 @dataclass
 class ChangeCaptureService:
     data_plane_base_url: str | None = None
+    default_tenant_id: str = "global"
 
     def normalize_streams_event(self, envelope: dict[str, Any]) -> dict[str, Any]:
         meta = envelope.get("meta", {})
@@ -34,11 +35,12 @@ class ChangeCaptureService:
 
         timestamp_ms = int(meta.get("timestamp", 0))
         event_time = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
+        object_type, object_id = _resolve_streams_object_identity(payload)
         return {
             "event_id": str(meta.get("txId", "0")),
-            "tenant_id": "default",
-            "object_type": str((payload.get("after") or {}).get("labels", ["Unknown"])[0]),
-            "object_id": str(payload.get("id", "")),
+            "tenant_id": self.default_tenant_id,
+            "object_type": object_type,
+            "object_id": object_id,
             "source_version": int(meta.get("txId", 0)),
             "object_version": int(meta.get("txId", 0)),
             "changed_fields": fields,
@@ -64,6 +66,11 @@ class ChangeCaptureService:
 
 def create_change_capture_app(service: ChangeCaptureService) -> FastAPI:
     app = FastAPI(title="Neo4j Change Capture API")
+    app.include_router(create_change_capture_router(service))
+    return app
+
+
+def create_change_capture_router(service: ChangeCaptureService) -> APIRouter:
     router = APIRouter(prefix="/api/v1/change-capture")
 
     @router.post("/neo4j/streams")
@@ -72,5 +79,19 @@ def create_change_capture_app(service: ChangeCaptureService) -> FastAPI:
         status = service.forward(normalized)
         return {"event": normalized, "forward_status": status}
 
-    app.include_router(router)
-    return app
+    return router
+
+
+def _resolve_streams_object_identity(payload: dict[str, Any]) -> tuple[str, str]:
+    entity_type = str(payload.get("type", "")).lower()
+    if entity_type == "relationship":
+        relation_label = payload.get("label") or "Relationship"
+        relation_id = payload.get("id")
+        if relation_id is None:
+            start_id = ((payload.get("start") or {}).get("id"))
+            end_id = ((payload.get("end") or {}).get("id"))
+            relation_id = f"{start_id}->{relation_label}->{end_id}"
+        return str(relation_label), str(relation_id)
+
+    labels = ((payload.get("after") or {}).get("labels")) or ((payload.get("before") or {}).get("labels")) or ["Unknown"]
+    return str(labels[0]), str(payload.get("id", ""))

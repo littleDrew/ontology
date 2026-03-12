@@ -23,7 +23,7 @@ class PropertyChangeRequest(BaseModel):
 
 class ObjectChangeEventRequest(BaseModel):
     event_id: str
-    tenant_id: str
+    tenant_id: str = "global"
     object_type: str
     object_id: str
     source_version: int
