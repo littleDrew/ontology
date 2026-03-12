@@ -58,7 +58,7 @@ graph LR
       A4[(Artifact Store)]
     end
 
-    subgraph NP[Neo4j & Change Capture]
+    subgraph NP[Neo4j & Event Sources]
       N1[(Neo4j Graph Store)]
       N2[Ontology Write Path]
       N3[Neo4j Streams]
@@ -113,7 +113,7 @@ graph LR
    - Object Monitor 通过 `Action Gateway Adapter` 以 REST 调用 `ontology/action API`；
    - 两者解耦后可独立扩缩容，且动作执行故障不会阻塞监控评估主循环。
 
-> 结论：阶段 1 的“逻辑架构图”是功能分层图，不强制物理同进程；当前开发态默认拆成两个服务：`Main Server` 与 `Object Monitor Server`。其中 `Object Monitor Server` 同时暴露 Data Plane 与 Change Capture 入口，便于本地联调；生产可按吞吐和隔离需求再拆分。
+> 结论：阶段 1 的“逻辑架构图”是功能分层图，不强制物理同进程；当前开发态默认拆成两个服务：`Main Server` 与 `Object Monitor Server`。当前开发态与生产态均以 Object Monitor Data Plane 单服务为入口，统一通过 Kafka 消费 `object_change_raw`。
 
 ### 3.2 `kafka: object_change_raw` 语义澄清（补充）
 
@@ -518,3 +518,61 @@ actions:
 - 压测与性能调优（并发消费、批量提交、序列化复用）。
 - 灰度发布与回滚门禁（流量比例、DLQ 警戒线、失败阈值）。
 - 出口：满足 Phase 1 SLO，具备上线条件。
+
+---
+
+## 10. 开发态收敛方案（在 Phase 1 内直接完成）
+
+为避免“文档先分期、代码后补齐”的割裂，当前开发态直接将原 Phase 2 的关键整改前置到 Phase 1，作为一阶段必做项。
+
+### 10.1 目标交互关系（统一入口）
+
+```text
+[Outbox / Neo4j Streams / Reconcile]
+              |
+              v
+      Kafka topic: object_change_raw (统一入口)
+              |
+              v
+   Object Monitor Runtime (单服务内)
+   - RawConsumer
+   - Normalizer + Dedupe
+   - ContextBuilder
+   - EventFilter
+   - L1 Evaluator
+   - ActionDispatcher
+   - Evaluation/Activity Ledger
+              |
+              v
+        Action API / Metrics / Replay
+```
+
+原则：
+
+1. 移除 `change-capture` 路由与独立实现，统一由 Runtime Kafka consumer 接入；
+2. 生产入口统一为 `object_change_raw` 消费；
+3. 可靠性治理（重试、死信、回放）纳入 Runtime 内部能力，不外挂单独服务。
+
+### 10.2 迭代 A（消费通道内建）在 Phase 1 的实现要求
+
+- 在 `runtime/capture` 内实现 RawConsumer，负责读取 `object_change_raw` 并驱动后续链路；
+- 支持两类 raw 负载：
+  - canonical `ObjectChangeEvent`；
+  - Neo4j Streams envelope（`meta + payload`）映射后进入统一模型；
+- Data Plane 暴露开发态运维接口：原始消息注入、重试队列处理、死信查询与回放。
+
+验收：
+
+- 不依赖独立 change-capture 进程与调试路由，Runtime 自行消费并触发评估/动作。
+
+### 10.3 迭代 B（可靠性治理）在 Phase 1 的实现要求
+
+- RawConsumer 具备有限次重试（backoff）；
+- 超过重试次数的消息进入 dead-letter 集合；
+- 提供 replay 能力，可将死信重新入队处理；
+- 输出基础指标：consumed/normalized/deduped/retried/dead_lettered/reconciliations。
+
+验收：
+
+- poison message 不阻塞后续消费；
+- replay 成功后不会导致重复 action（依赖 normalizer + evaluator 幂等）。

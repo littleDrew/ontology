@@ -5,7 +5,6 @@ Keep this module as a stable import path for tests and existing callers.
 """
 
 from scripts.object_monitor.service_factory import (  # noqa: F401
-    build_change_capture_app,
     build_object_monitor_data_plane_app,
     build_object_monitor_data_plane_service,
     build_object_monitor_server_app,

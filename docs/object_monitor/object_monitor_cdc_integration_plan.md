@@ -2,6 +2,9 @@
 
 ## 1. 一阶段目标与结论
 
+
+> 文档关系：本文件聚焦 **Phase 1 CDC/Streams 接入**。关于统一入口（`object_change_raw`）与 Runtime 消费治理，请以 `docs/object_monitor/object_monitor_design_phase1.md` 第 10 章为准。
+
 Phase 1 在当前仓库与部署假设下，主路径统一为：
 
 - **事实写入主通道**：Ontology 写路径产出 Tx Outbox -> `object_change_raw`；
