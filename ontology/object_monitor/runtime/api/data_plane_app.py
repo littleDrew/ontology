@@ -1,39 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, FastAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from ontology.object_monitor.define.api.contracts import EvaluationResult, MonitorArtifact, ObjectChangeEvent, PropertyChange
+from ontology.object_monitor.define.api.contracts import EvaluationResult, MonitorArtifact, ObjectChangeEvent
 from ontology.object_monitor.runtime.action_dispatcher import ActionDispatcher
 from ontology.object_monitor.runtime.capture.raw_consumer import KafkaRawConsumerRunner, RawConsumerRuntime
 from ontology.object_monitor.runtime.event_filter import EventFilter, MonitorRuntimeSpec
 from ontology.object_monitor.runtime.evaluator import L1Evaluator
 from ontology.object_monitor.runtime.storage.activity_repository import ActivityQuery, InMemoryActivityLedger
 from ontology.object_monitor.runtime.storage.repository import EvaluationQuery, InMemoryEvaluationLedger
-
-
-class PropertyChangeRequest(BaseModel):
-    field: str
-    old_value: Any = None
-    new_value: Any = None
-
-
-class ObjectChangeEventRequest(BaseModel):
-    event_id: str
-    tenant_id: str = "global"
-    object_type: str
-    object_id: str
-    source_version: int
-    object_version: int
-    changed_fields: list[str]
-    event_time: datetime
-    trace_id: str
-    change_source: str = "outbox"
-    changed_properties: list[PropertyChangeRequest] = Field(default_factory=list)
 
 
 class ArtifactReloadRequest(BaseModel):
@@ -125,26 +104,6 @@ def create_object_monitor_data_plane_app(service: ObjectMonitorDataPlaneService)
         artifacts = [MonitorArtifact(**raw) for raw in request.artifacts]
         loaded = service.reload_artifacts(artifacts)
         return {"loaded": loaded}
-
-    @router.post("/events/object-change")
-    def ingest_event(request: ObjectChangeEventRequest) -> dict[str, Any]:
-        event = ObjectChangeEvent(
-            event_id=request.event_id,
-            tenant_id=request.tenant_id,
-            object_type=request.object_type,
-            object_id=request.object_id,
-            source_version=request.source_version,
-            object_version=request.object_version,
-            changed_fields=request.changed_fields,
-            event_time=request.event_time,
-            trace_id=request.trace_id,
-            change_source=request.change_source,
-            changed_properties=[
-                PropertyChange(field=item.field, old_value=item.old_value, new_value=item.new_value)
-                for item in request.changed_properties
-            ],
-        )
-        return service.process_event(event)
 
     @router.get("/evaluations")
     def list_evaluations(tenant_id: str, monitor_id: str | None = None, object_id: str | None = None) -> list[dict[str, Any]]:

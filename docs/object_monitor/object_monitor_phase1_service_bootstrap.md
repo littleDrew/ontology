@@ -13,7 +13,6 @@
    - 启动命令：`python -m scripts.object_monitor.object_monitor_server --port 8771 --action-base-url http://127.0.0.1:8765 --kafka-bootstrap-servers 127.0.0.1:9092 --kafka-topic object_change_raw`
    - 提供：
      - 加载生效 Artifact：`POST /api/v1/data-plane/reload-artifacts`
-     - 处理对象变更事件：`POST /api/v1/data-plane/events/object-change`
      - 重试/死信运维：`POST /api/v1/data-plane/raw/retry/process`、`GET /api/v1/data-plane/raw/dead-letters`、`POST /api/v1/data-plane/raw/dead-letters/{dead_letter_id}/replay`
      - 运行结果查询：`GET /api/v1/data-plane/evaluations`、`GET /api/v1/data-plane/activities`
 
