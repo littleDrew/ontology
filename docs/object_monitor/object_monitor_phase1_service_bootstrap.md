@@ -44,6 +44,7 @@ bash scripts/object_monitor/start_server.sh
 - `ontology/object_monitor/runtime/api/*`：Data Plane FastAPI 入口（含可选的 Change Capture 调试路由）
 - `ontology/object_monitor/runtime/storage/*`：Runtime 侧 evaluation/activity 仓储导出
 - `ontology/object_monitor/runtime/capture/*`：Runtime 内部 capture 能力（pipeline/normalizer/reconcile 与 source 适配）
+- `scripts/object_monitor/service_factory.py`：服务组装与启动依赖注入（脚本层）。
 
 ## 当前边界收口（开发态）
 
